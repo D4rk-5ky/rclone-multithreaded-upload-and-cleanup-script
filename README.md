@@ -9,13 +9,18 @@ The script supports:
 - Multiple upload destinations.
 - Per-remote cleanup behavior.
 - Per-folder retention limits.
+- Per-upload-remote total storage quota limits.
 - File-count based cleanup.
-- Size-based cleanup.
+- Per-folder size-based cleanup.
+- Remote/provider-wide size-based cleanup.
 - Optional age-based cleanup.
 - Optional direct delete or trash/default delete behavior.
 - Optional remote trash cleanup.
 - Selectable upload command: `copy`, `sync`, or `move`.
-- Threaded cleanup, threaded trash cleanup, and threaded uploads.
+- Threaded per-folder cleanup.
+- Threaded remote quota cleanup.
+- Threaded trash cleanup.
+- Threaded uploads.
 - A startup summary showing exactly what the script is configured to do before it starts.
 
 > [!WARNING]
@@ -39,19 +44,19 @@ The script supports:
 
 ## Important Design
 
-The script separates folder retention from cloud/remote cleanup behavior.
+The script separates **camera folder retention rules** from **cloud/provider cleanup rules**.
 
 ### `RCLONE_DIRECTORIES`
 
-These are the camera folders to clean below each remote.
+These are the camera folders to clean below each upload remote.
 
-They should only contain:
+They control only:
 
-- Relative folder path
-- `max_files`
-- `max_size`
+- Relative camera folder path
+- Optional per-folder `max_files`
+- Optional per-folder `max_size`
 
-They should **not** decide whether files are deleted directly, moved to trash, or whether old-file cleanup is enabled.
+They do **not** decide whether files are deleted directly, moved to trash, whether age cleanup is enabled, or what provider-wide quota should be used.
 
 Example:
 
@@ -79,6 +84,7 @@ They control:
 - Upload command: `copy`, `sync`, or `move`
 - Whether old files are deleted on that remote
 - Whether excessive files are deleted on that remote
+- Provider-wide total size limit via `max_total_size`
 - Whether deletes are direct or use trash/default backend behavior
 - Whether to run `rclone cleanup` / empty trash for that remote
 
@@ -92,6 +98,7 @@ UPLOAD_DIRECTORIES = [
         upload_command="copy",
         delete_old_files=True,
         delete_excess_files=True,
+        max_total_size="500G",
         delete_to_trash=False,
         empty_trash=True,
         copy_options=[
@@ -105,52 +112,106 @@ UPLOAD_DIRECTORIES = [
 ]
 ```
 
-This means the same camera folder can be cleaned differently depending on the cloud remote.
+This means each cloud provider can have its own cleanup behavior and storage quota.
 
 For example:
 
 ```text
 Google Drive remote:
+  max_total_size = 500G
   direct delete
   delete old files
   delete excessive files
   empty trash
 
 Mega remote:
+  max_total_size = 250G
   trash/default delete behavior
   delete old files
   delete excessive files
   do not empty trash
 
 OneDrive remote:
+  max_total_size = 1T
   skip age-based old-file cleanup
-  still enforce max_files/max_size
+  still enforce per-folder and provider-wide excess cleanup
   direct delete
   do not empty trash
 ```
 
 ---
 
-## Features
+## Cleanup Levels
 
-- Uploads CCTV/Shinobi recordings to multiple `rclone` remotes.
-- Supports `rclone copy`, `rclone sync`, and `rclone move`.
-- Supports different upload options per remote.
-- Cleans old files from remote camera folders.
-- Cleans excessive files based on:
-  - Maximum number of files
-  - Maximum folder size
-  - Or both
-- Cleanup behavior is configurable per upload remote.
-- Can delete directly or use trash/default backend behavior.
-- Can optionally empty remote trash with `rclone cleanup`.
-- Can run cleanup jobs in parallel.
-- Can run trash cleanup jobs in parallel.
-- Can run upload jobs in parallel.
-- Uses a lock file to prevent multiple script instances from running at the same time.
-- Handles missing remote folders without failing the whole script.
-- Shows a startup summary before doing any cleanup or upload.
-- Streams upload output live to terminal, cron logs, or systemd logs.
+The script now supports **two different size cleanup levels**.
+
+### 1. Per-folder cleanup
+
+Configured in `RCLONE_DIRECTORIES`.
+
+Example:
+
+```python
+RcloneDirectory(
+    path="Home/Camera01",
+    max_files=80,
+)
+```
+
+or:
+
+```python
+RcloneDirectory(
+    path="Home/Camera02",
+    max_size="50G",
+)
+```
+
+This controls only that individual camera folder.
+
+### 2. Per-upload-remote provider quota cleanup
+
+Configured in `UPLOAD_DIRECTORIES`.
+
+Example:
+
+```python
+UploadDirectory(
+    remote_path="Example-GoogleDrive-Encrypted:/CCTV",
+    max_total_size="500G",
+    ...
+)
+```
+
+This controls the total size used under that remote across all configured camera folders.
+
+For example, if this remote has:
+
+```text
+Home/Camera01 = 200G
+Home/Camera02 = 200G
+Garage/Camera03 = 150G
+Outside/Camera04 = 100G
+```
+
+Total managed size:
+
+```text
+650G
+```
+
+If:
+
+```python
+max_total_size="500G"
+```
+
+then the script deletes the oldest files across the managed camera folders until the total managed size is below `500G`.
+
+> [!NOTE]
+> `max_total_size` only counts folders listed in `RCLONE_DIRECTORIES`.
+>
+> It does not count unrelated folders elsewhere in the cloud account.
 
 ---
 
@@ -161,25 +222,31 @@ The script runs in this order:
 1. **Startup summary**
    - Prints all configured camera folder rules.
    - Prints all upload remotes.
-   - Prints all generated cleanup targets.
+   - Prints all generated per-folder cleanup targets.
+   - Prints provider-wide quota cleanup settings.
    - Prints whether each remote will delete old files, delete excess files, use direct delete, use trash/default behavior, and empty trash.
 
-2. **Remote camera folder cleanup**
+2. **Per-folder remote cleanup**
    - Builds full cleanup paths by combining every upload remote with every camera folder.
    - Optionally deletes files older than `DELETE_MIN_AGE`.
    - Optionally lists files and creates a delete list for files above `max_files` or `max_size`.
-   - Deletes oldest files first until limits are satisfied.
+   - Deletes oldest files first until per-folder limits are satisfied.
 
-3. **Remote trash cleanup**
+3. **Per-upload-remote quota cleanup**
+   - Checks all managed files below each upload remote.
+   - Counts only folders listed in `RCLONE_DIRECTORIES`.
+   - If `max_total_size` is set, deletes oldest managed files until the remote is below that limit.
+
+4. **Remote trash cleanup**
    - Runs `rclone cleanup` for upload remotes where `empty_trash=True`.
    - Skips remotes where `empty_trash=False`.
    - Treats unsupported `rclone cleanup` as non-fatal.
 
-4. **Upload**
+5. **Upload**
    - Runs `rclone copy`, `rclone sync`, or `rclone move` from the local CCTV folder to each configured remote.
    - Upload jobs run in parallel according to `UPLOAD_THREADS`.
 
-The script will **not upload new files** if cleanup or trash cleanup has a real failure.
+The script will **not upload new files** if cleanup, remote quota cleanup, or trash cleanup has a real failure.
 
 ---
 
@@ -239,7 +306,7 @@ UPLOAD_DIRECTORIES = [
 ]
 ```
 
-the script generates these cleanup targets:
+the script generates these per-folder cleanup targets:
 
 ```text
 Example-GoogleDrive-Encrypted:/CCTV/Home/Camera01
@@ -247,6 +314,15 @@ Example-GoogleDrive-Encrypted:/CCTV/Home/Camera02
 Example-Mega-Encrypted:/CCTV/Home/Camera01
 Example-Mega-Encrypted:/CCTV/Home/Camera02
 ```
+
+The remote quota cleanup then checks managed files under:
+
+```text
+Example-GoogleDrive-Encrypted:/CCTV
+Example-Mega-Encrypted:/CCTV
+```
+
+but only inside the configured camera folders.
 
 ---
 
@@ -285,8 +361,8 @@ RCLONE_DIRECTORIES = [
 | Option | Meaning |
 |---|---|
 | `path` | Camera folder path relative to the upload remote root |
-| `max_files` | Number of newest files to keep |
-| `max_size` | Maximum total folder size to keep, such as `"50G"` or `"500M"` |
+| `max_files` | Number of newest files to keep in that folder |
+| `max_size` | Maximum size for that individual folder, such as `"50G"` or `"500M"` |
 
 ### `max_files`
 
@@ -297,9 +373,9 @@ RcloneDirectory(
 )
 ```
 
-This keeps the newest 80 files and deletes older excessive files if excess cleanup is enabled for the upload remote.
+This keeps the newest 80 files in that camera folder if excess cleanup is enabled for the upload remote.
 
-### `max_size`
+### Per-folder `max_size`
 
 ```python
 RcloneDirectory(
@@ -308,9 +384,9 @@ RcloneDirectory(
 )
 ```
 
-This deletes oldest files until the folder is below 50 GiB if excess cleanup is enabled for the upload remote.
+This deletes oldest files until that individual folder is below 50 GiB if excess cleanup is enabled for the upload remote.
 
-### `max_files` and `max_size` together
+### `max_files` and per-folder `max_size` together
 
 ```python
 RcloneDirectory(
@@ -320,7 +396,7 @@ RcloneDirectory(
 )
 ```
 
-This deletes oldest files until both conditions are satisfied:
+This deletes oldest files until both conditions are satisfied for that individual folder:
 
 ```text
 file count <= 200
@@ -341,6 +417,7 @@ UPLOAD_DIRECTORIES = [
         upload_command="copy",
         delete_old_files=True,
         delete_excess_files=True,
+        max_total_size="500G",
         delete_to_trash=False,
         empty_trash=True,
         copy_options=[
@@ -357,6 +434,7 @@ UPLOAD_DIRECTORIES = [
         upload_command="copy",
         delete_old_files=True,
         delete_excess_files=True,
+        max_total_size="250G",
         delete_to_trash=True,
         empty_trash=False,
         copy_options=[
@@ -373,6 +451,7 @@ UPLOAD_DIRECTORIES = [
         upload_command="sync",
         delete_old_files=False,
         delete_excess_files=True,
+        max_total_size="1T",
         delete_to_trash=False,
         empty_trash=False,
         copy_options=[
@@ -392,10 +471,60 @@ UPLOAD_DIRECTORIES = [
 | `remote_path` | Remote destination root |
 | `upload_command` | Rclone command used for upload: `copy`, `sync`, or `move` |
 | `delete_old_files` | Whether to delete files older than `DELETE_MIN_AGE` on this remote |
-| `delete_excess_files` | Whether to enforce `max_files` / `max_size` cleanup on this remote |
+| `delete_excess_files` | Whether to enforce per-folder limits and remote-wide quota cleanup on this remote |
+| `max_total_size` | Maximum total size for all managed camera folders under this remote |
 | `delete_to_trash` | Whether delete operations should use trash/default backend behavior |
 | `empty_trash` | Whether to run `rclone cleanup` for this remote |
 | `copy_options` | Extra options passed to the upload command |
+
+---
+
+## Remote-Wide Provider Quota: `max_total_size`
+
+`max_total_size` belongs in `UPLOAD_DIRECTORIES`, because storage quota is normally tied to the cloud provider or account.
+
+Example:
+
+```python
+UploadDirectory(
+    remote_path="Example-GoogleDrive-Encrypted:/CCTV",
+    max_total_size="500G",
+    ...
+)
+```
+
+This tells the script:
+
+```text
+For this remote destination, keep all managed camera folders below 500G total.
+```
+
+It checks the files in all configured `RCLONE_DIRECTORIES` under that `remote_path`.
+
+### Disable remote-wide quota cleanup
+
+```python
+max_total_size=None
+```
+
+This disables provider-wide quota cleanup for that upload remote.
+
+### Relationship to `delete_excess_files`
+
+Remote-wide quota cleanup only runs when both are true:
+
+```python
+delete_excess_files=True
+max_total_size is not None
+```
+
+If:
+
+```python
+delete_excess_files=False
+```
+
+then both per-folder excess cleanup and remote-wide quota cleanup are skipped for that upload remote.
 
 ---
 
@@ -548,13 +677,15 @@ Uploads files and removes the local source files after successful transfer.
 ```python
 UPLOAD_THREADS = 2
 CLEANUP_THREADS = 2
+REMOTE_QUOTA_CLEANUP_THREADS = 2
 TRASH_CLEANUP_THREADS = 2
 ```
 
 | Option | Meaning |
 |---|---|
 | `UPLOAD_THREADS` | Number of parallel upload jobs |
-| `CLEANUP_THREADS` | Number of parallel generated cleanup target jobs |
+| `CLEANUP_THREADS` | Number of parallel generated per-folder cleanup target jobs |
+| `REMOTE_QUOTA_CLEANUP_THREADS` | Number of parallel remote-wide quota cleanup jobs |
 | `TRASH_CLEANUP_THREADS` | Number of parallel trash-cleanup jobs |
 
 Lower these values if your machine, disk, network, or cloud providers become overloaded.
@@ -571,7 +702,8 @@ Before running cleanup or upload, the script prints a summary showing:
 - Upload destinations
 - Upload commands
 - Per-remote cleanup behavior
-- Generated cleanup targets
+- Generated per-folder cleanup targets
+- Remote-wide quota cleanup settings
 - Delete mode
 - Empty trash setting
 - Total number of targets
@@ -847,6 +979,7 @@ DELETE_MIN_AGE
 delete_to_trash
 empty_trash
 upload_command
+max_total_size
 ```
 
 ### Path Mistakes Can Be Dangerous
@@ -901,6 +1034,16 @@ then delete commands add:
 
 This may make deleted files unrecoverable.
 
+### Remote Quota Cleanup Deletes Across Managed Folders
+
+If you use:
+
+```python
+max_total_size="500G"
+```
+
+the script may delete the oldest files across all configured camera folders under that remote, not only from one folder.
+
 ---
 
 ## Exit Codes
@@ -908,7 +1051,7 @@ This may make deleted files unrecoverable.
 | Exit Code | Meaning |
 |---|---|
 | `0` | Success |
-| `1` | Cleanup, trash cleanup, upload, or lock creation failed |
+| `1` | Per-folder cleanup, remote quota cleanup, trash cleanup, upload, or lock creation failed |
 | `128 + signal` | Script was interrupted by a signal |
 
 ---
@@ -922,6 +1065,7 @@ This may make deleted files unrecoverable.
 - If cleanup fails, upload is skipped.
 - Some `rclone` backends may not support all options.
 - Some `rclone` backends may treat trash/delete behavior differently.
+- `max_total_size` only counts the managed folders listed in `RCLONE_DIRECTORIES`.
 
 ---
 
