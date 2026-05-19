@@ -89,6 +89,14 @@ class UploadDirectory:
     delete_old_files: bool = True
     delete_excess_files: bool = True
 
+    # Optional total size limit for this upload remote.
+    # This is checked across all configured RCLONE_DIRECTORIES below this
+    # upload.remote_path. It does not inspect unrelated folders outside the
+    # configured camera folders.
+    #
+    # Example: "500G", "1T", "200G"
+    max_total_size: str | None = None
+
     # False = add --drive-use-trash=false where supported.
     # True  = do not add --drive-use-trash=false; use backend default/trash behavior.
     delete_to_trash: bool = False
@@ -124,6 +132,20 @@ class RemoteFile:
     path: str
     size: int
     modified: str
+
+
+@dataclass
+class RemoteQuotaFile:
+    """
+    File entry used for per-upload-remote total size cleanup.
+
+    path is relative to UploadDirectory.remote_path, so it can be used with:
+      rclone delete --files-from LIST upload.remote_path
+    """
+    path: str
+    size: int
+    modified: str
+    source_folder: str
 
 
 # =============================================================================
@@ -167,8 +189,8 @@ RCLONE_DIRECTORIES = [
 # Replace these example remotes and local paths with your real private values.
 #
 # Important:
-#   delete_old_files/delete_excess_files/delete_to_trash belong here because
-#   they are remote/cloud behavior, not camera-folder behavior.
+#   delete_old_files/delete_excess_files/delete_to_trash/max_total_size
+#   belong here because they are remote/cloud behavior.
 UPLOAD_DIRECTORIES = [
     # Example remote 1:
     #   - upload with rclone copy
@@ -182,6 +204,7 @@ UPLOAD_DIRECTORIES = [
         upload_command="copy",
         delete_old_files=True,
         delete_excess_files=True,
+        max_total_size="500G",
         delete_to_trash=False,
         empty_trash=True,
         copy_options=[
@@ -205,6 +228,7 @@ UPLOAD_DIRECTORIES = [
         upload_command="copy",
         delete_old_files=True,
         delete_excess_files=True,
+        max_total_size="250G",
         delete_to_trash=True,
         empty_trash=False,
         copy_options=[
@@ -231,6 +255,7 @@ UPLOAD_DIRECTORIES = [
         upload_command="sync",
         delete_old_files=False,
         delete_excess_files=True,
+        max_total_size="1T",
         delete_to_trash=False,
         empty_trash=False,
         copy_options=[
@@ -255,6 +280,7 @@ UPLOAD_DIRECTORIES = [
     #     upload_command="move",
     #     delete_old_files=False,
     #     delete_excess_files=False,
+    #     max_total_size=None,
     #     delete_to_trash=False,
     #     empty_trash=False,
     #     copy_options=[
@@ -290,6 +316,7 @@ ALLOWED_UPLOAD_COMMANDS = {
 # Upload jobs run once per upload remote.
 UPLOAD_THREADS = 2
 CLEANUP_THREADS = 2
+REMOTE_QUOTA_CLEANUP_THREADS = 2
 TRASH_CLEANUP_THREADS = 2
 
 
@@ -458,7 +485,14 @@ def join_rclone_remote_path(remote_root: str, relative_path: str) -> str:
     return f"{remote_root.rstrip('/')}/{relative_path.lstrip('/')}"
 
 
-def get_delete_mode_options(target: CleanupTarget) -> list[str]:
+def join_relative_path(base: str, child: str) -> str:
+    """
+    Join two relative paths for use inside --files-from.
+    """
+    return f"{base.rstrip('/')}/{child.lstrip('/')}"
+
+
+def get_delete_mode_options(target: CleanupTarget | UploadDirectory) -> list[str]:
     """
     Return rclone delete options for direct-delete or trash/default mode.
 
@@ -583,9 +617,10 @@ def print_startup_summary(cleanup_directories: list[CleanupTarget]):
 
         print()
         print("Thread limits:")
-        print(f"  Cleanup jobs       : {CLEANUP_THREADS}")
-        print(f"  Trash cleanup jobs : {TRASH_CLEANUP_THREADS}")
-        print(f"  Upload jobs        : {UPLOAD_THREADS}")
+        print(f"  Per-folder cleanup jobs   : {CLEANUP_THREADS}")
+        print(f"  Remote quota cleanup jobs : {REMOTE_QUOTA_CLEANUP_THREADS}")
+        print(f"  Trash cleanup jobs        : {TRASH_CLEANUP_THREADS}")
+        print(f"  Upload jobs               : {UPLOAD_THREADS}")
 
         print()
         print("Global cleanup settings:")
@@ -615,6 +650,7 @@ def print_startup_summary(cleanup_directories: list[CleanupTarget]):
             print(f"    Upload command      : rclone {upload_command}")
             print(f"    Delete old files    : {upload.delete_old_files}")
             print(f"    Delete excess files : {upload.delete_excess_files}")
+            print(f"    Remote max total    : {upload.max_total_size}")
             print(f"    Delete mode         : {get_delete_mode_text(upload)}")
             print(f"    Empty trash         : {upload.empty_trash}")
             print(f"    Upload options      : {' '.join(upload.copy_options)}")
@@ -630,6 +666,16 @@ def print_startup_summary(cleanup_directories: list[CleanupTarget]):
             print(f"    Max size            : {target.max_size}")
             print(f"    Delete mode         : {get_delete_mode_text(target)}")
             print(f"    Delete min age      : {DELETE_MIN_AGE}")
+
+        print()
+        print("Remote-wide quota cleanup:")
+        for index, upload in enumerate(UPLOAD_DIRECTORIES, start=1):
+            print(f"  Remote quota target {index}:")
+            print(f"    Remote path    : {upload.remote_path}")
+            print(f"    Enabled        : {upload.delete_excess_files and upload.max_total_size is not None}")
+            print(f"    Max total size : {upload.max_total_size}")
+            print(f"    Delete mode    : {get_delete_mode_text(upload)}")
+            print(f"    Counts folders : {[directory.path for directory in RCLONE_DIRECTORIES]}")
 
         print()
         print(f"Total upload destinations : {len(UPLOAD_DIRECTORIES)}")
@@ -795,6 +841,100 @@ def make_delete_list(target: CleanupTarget) -> Path:
     return delete_list_path
 
 
+def get_upload_remote_quota_entries(upload: UploadDirectory) -> list[RemoteQuotaFile]:
+    """
+    Get all managed files below one upload remote across all configured camera folders.
+
+    This only counts folders listed in RCLONE_DIRECTORIES.
+    It does not count unrelated folders/files elsewhere in the cloud account.
+    """
+    all_files: list[RemoteQuotaFile] = []
+
+    for directory in RCLONE_DIRECTORIES:
+        full_remote_path = join_rclone_remote_path(upload.remote_path, directory.path)
+        entries = get_remote_file_entries(full_remote_path)
+
+        for file in entries:
+            all_files.append(
+                RemoteQuotaFile(
+                    path=join_relative_path(directory.path, file.path),
+                    size=file.size,
+                    modified=file.modified,
+                    source_folder=directory.path,
+                )
+            )
+
+    return all_files
+
+
+def make_upload_remote_quota_delete_list(upload: UploadDirectory) -> Path:
+    """
+    Create a --files-from list for remote-wide quota cleanup.
+
+    This enforces upload.max_total_size across all configured camera folders
+    below upload.remote_path.
+    """
+    DELETE_LIST_DIR.mkdir(parents=True, exist_ok=True)
+
+    safe_name = remote_name_from_path(upload.remote_path)
+    delete_list_path = DELETE_LIST_DIR / f"to-delete-remote-quota-{safe_name}"
+
+    if upload.max_total_size is None:
+        delete_list_path.write_text("", encoding="utf-8")
+        return delete_list_path
+
+    max_total_size_bytes = parse_size_to_bytes(upload.max_total_size)
+    files = get_upload_remote_quota_entries(upload)
+
+    if not files:
+        print_step(f"No managed files found below {upload.remote_path}")
+        delete_list_path.write_text("", encoding="utf-8")
+        return delete_list_path
+
+    files_oldest_first = sorted(
+        files,
+        key=lambda item: (item.modified, item.path),
+    )
+
+    total_size = sum(file.size for file in files_oldest_first)
+    total_files = len(files_oldest_first)
+
+    files_to_delete: list[RemoteQuotaFile] = []
+    current_size = total_size
+    current_files = total_files
+
+    for file in files_oldest_first:
+        if current_size <= max_total_size_bytes:
+            break
+
+        files_to_delete.append(file)
+        current_size -= file.size
+        current_files -= 1
+
+    delete_list_path.write_text(
+        "\n".join(file.path for file in files_to_delete)
+        + ("\n" if files_to_delete else ""),
+        encoding="utf-8",
+    )
+
+    size_before_gib = total_size / 1024 ** 3
+    size_after_gib = current_size / 1024 ** 3
+    deleted_size_gib = (total_size - current_size) / 1024 ** 3
+    max_size_gib = max_total_size_bytes / 1024 ** 3
+
+    print_step(
+        f"Made remote quota delete list for {upload.remote_path}: "
+        f"{len(files_to_delete)} file(s) marked for deletion. "
+        f"Files before: {total_files}, after: {current_files}. "
+        f"Size before: {size_before_gib:.2f} GiB, "
+        f"after: {size_after_gib:.2f} GiB, "
+        f"limit: {max_size_gib:.2f} GiB, "
+        f"delete: {deleted_size_gib:.2f} GiB."
+    )
+
+    return delete_list_path
+
+
 # =============================================================================
 # Cleanup jobs
 # =============================================================================
@@ -951,6 +1091,96 @@ def cleanup_one_directory(job_number: int, target: CleanupTarget) -> bool:
         job_number,
         target.path,
         "Cleanup job finished successfully",
+    )
+
+    return True
+
+
+def cleanup_one_upload_remote_quota(job_number: int, upload: UploadDirectory) -> bool:
+    """
+    Enforce upload.max_total_size across all configured RCLONE_DIRECTORIES
+    below upload.remote_path.
+    """
+    print_job_block(
+        "REMOTE QUOTA CLEANUP JOB",
+        job_number,
+        upload.remote_path,
+        "Starting remote-wide quota cleanup job",
+    )
+
+    if not upload.delete_excess_files:
+        print_job_block(
+            "REMOTE QUOTA CLEANUP JOB",
+            job_number,
+            upload.remote_path,
+            "delete_excess_files=False, skipping remote-wide quota cleanup",
+        )
+        return True
+
+    if upload.max_total_size is None:
+        print_job_block(
+            "REMOTE QUOTA CLEANUP JOB",
+            job_number,
+            upload.remote_path,
+            "max_total_size=None, skipping remote-wide quota cleanup",
+        )
+        return True
+
+    try:
+        delete_list_path = make_upload_remote_quota_delete_list(upload)
+    except Exception as error:
+        print_job_block(
+            "REMOTE QUOTA CLEANUP JOB",
+            job_number,
+            upload.remote_path,
+            f"Failed making remote quota delete list: {error}",
+        )
+        return False
+
+    if delete_list_path.stat().st_size == 0:
+        print_job_block(
+            "REMOTE QUOTA CLEANUP JOB",
+            job_number,
+            upload.remote_path,
+            "No remote-wide quota files to delete",
+        )
+        return True
+
+    result = run_command(
+        [
+            "rclone",
+            "delete",
+            "--files-from", str(delete_list_path),
+            upload.remote_path,
+        ] + get_delete_mode_options(upload),
+        capture_output=True,
+    )
+
+    output = ""
+
+    if result.stdout:
+        output += result.stdout
+
+    if result.stderr:
+        output += result.stderr
+
+    if output:
+        print_job_block("REMOTE QUOTA CLEANUP JOB", job_number, upload.remote_path, output)
+
+    if result.returncode != 0:
+        print_job_block(
+            "REMOTE QUOTA CLEANUP JOB",
+            job_number,
+            upload.remote_path,
+            f"Failed deleting remote-wide quota files. Return code: {result.returncode}",
+        )
+        return False
+
+    print_job_block(
+        "REMOTE QUOTA CLEANUP JOB",
+        job_number,
+        upload.remote_path,
+        "Remote-wide quota cleanup finished successfully",
     )
 
     return True
@@ -1224,8 +1454,48 @@ def main():
         print_error("One or more cleanup jobs failed")
         sys.exit(1)
 
+
     # ----------------------------
-    # Phase 2: Empty remote trash/recycle bin
+    # Phase 2: Per-upload-remote total quota cleanup
+    # ----------------------------
+
+    print_step(
+        f"Cleaning remote-wide quota using up to "
+        f"{REMOTE_QUOTA_CLEANUP_THREADS} REMOTE QUOTA CLEANUP JOB(s)"
+    )
+
+    remote_quota_cleanup_failed = False
+
+    with ThreadPoolExecutor(max_workers=REMOTE_QUOTA_CLEANUP_THREADS) as executor:
+        future_to_remote_quota_cleanup = {
+            executor.submit(cleanup_one_upload_remote_quota, index, upload): upload
+            for index, upload in enumerate(UPLOAD_DIRECTORIES, start=1)
+        }
+
+        for future in as_completed(future_to_remote_quota_cleanup):
+            upload = future_to_remote_quota_cleanup[future]
+
+            try:
+                success = future.result()
+            except Exception as error:
+                print_job_block(
+                    "REMOTE QUOTA CLEANUP JOB",
+                    0,
+                    upload.remote_path,
+                    f"Remote quota cleanup crashed: {error}",
+                )
+                remote_quota_cleanup_failed = True
+                continue
+
+            if not success:
+                remote_quota_cleanup_failed = True
+
+    if remote_quota_cleanup_failed:
+        print_error("One or more remote quota cleanup jobs failed")
+        sys.exit(1)
+
+    # ----------------------------
+    # Phase 3: Empty remote trash/recycle bin
     # ----------------------------
 
     print_step(
@@ -1268,7 +1538,7 @@ def main():
     sleep_after_step()
 
     # ----------------------------
-    # Phase 3: Upload new files
+    # Phase 4: Upload new files
     # ----------------------------
 
     print_step(
