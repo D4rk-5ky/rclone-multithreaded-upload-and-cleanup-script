@@ -1,55 +1,156 @@
 # Rclone CCTV Multi-Remote Upload and Cleanup Script
 
-A Python script for uploading CCTV/Shinobi recordings to multiple `rclone` remotes while also cleaning old or excessive files from remote camera folders.
+A Python 3 script for uploading CCTV/Shinobi recordings to multiple `rclone` remotes while also cleaning old or excessive files from remote camera folders.
 
-The script is designed for setups where one local CCTV directory is copied, synced, or moved to several cloud/encrypted `rclone` remotes, for example Google Drive, Mega, OneDrive, SFTP, or other supported backends.
+This project is designed for setups where one local CCTV directory is uploaded to several cloud/encrypted remotes, such as Google Drive, Mega, OneDrive, SFTP, or any other `rclone` backend.
+
+The script supports:
+
+- Multiple upload destinations.
+- Per-remote cleanup behavior.
+- Per-folder retention limits.
+- File-count based cleanup.
+- Size-based cleanup.
+- Optional age-based cleanup.
+- Optional direct delete or trash/default delete behavior.
+- Optional remote trash cleanup.
+- Selectable upload command: `copy`, `sync`, or `move`.
+- Threaded cleanup, threaded trash cleanup, and threaded uploads.
+- A startup summary showing exactly what the script is configured to do before it starts.
 
 > [!WARNING]
-> This script can delete files from your configured `rclone` remotes.
+> This script can permanently delete files from your configured `rclone` remotes.
 >
-> Depending on your configuration, it can either:
->
-> - delete directly/permanently where supported, or
-> - use the backend/cloud provider trash behavior where supported.
->
-> Direct delete mode may use options such as:
+> Depending on your configuration, it may run commands similar to:
 >
 > ```bash
-> --drive-use-trash=false
+> rclone delete remote:/path --drive-use-trash=false
 > ```
 >
-> That can bypass the cloud provider trash/recycle bin and may make deleted files unrecoverable.
+> That may bypass your cloud provider trash/recycle bin and make deleted files unrecoverable.
 >
 > **You are fully responsible for all damage, data loss, account issues, misconfiguration, or other problems caused by using this software.**
 >
 > The author, contributors, and anyone sharing this script are **not responsible** for any loss or damage.
 >
-> Use this script at your own risk. Always test with non-important data first.
+> Test with non-important data first. Use `--dry-run` while testing.
+
+---
+
+## Important Design
+
+The script separates folder retention from cloud/remote cleanup behavior.
+
+### `RCLONE_DIRECTORIES`
+
+These are the camera folders to clean below each remote.
+
+They should only contain:
+
+- Relative folder path
+- `max_files`
+- `max_size`
+
+They should **not** decide whether files are deleted directly, moved to trash, or whether old-file cleanup is enabled.
+
+Example:
+
+```python
+RCLONE_DIRECTORIES = [
+    RcloneDirectory(
+        path="Home/Camera01",
+        max_files=80,
+    ),
+    RcloneDirectory(
+        path="Home/Camera02",
+        max_size="50G",
+    ),
+]
+```
+
+### `UPLOAD_DIRECTORIES`
+
+These are the cloud/upload destinations.
+
+They control:
+
+- Local source path
+- Remote upload path
+- Upload command: `copy`, `sync`, or `move`
+- Whether old files are deleted on that remote
+- Whether excessive files are deleted on that remote
+- Whether deletes are direct or use trash/default backend behavior
+- Whether to run `rclone cleanup` / empty trash for that remote
+
+Example:
+
+```python
+UPLOAD_DIRECTORIES = [
+    UploadDirectory(
+        local_path="/path/to/local/CCTV",
+        remote_path="Example-GoogleDrive-Encrypted:/CCTV",
+        upload_command="copy",
+        delete_old_files=True,
+        delete_excess_files=True,
+        delete_to_trash=False,
+        empty_trash=True,
+        copy_options=[
+            "--max-age", "3h",
+            "--stats", "10s",
+            "--stats-one-line",
+            "--transfers", "4",
+            "--exclude", "/Home/OldCamera/**",
+        ],
+    ),
+]
+```
+
+This means the same camera folder can be cleaned differently depending on the cloud remote.
+
+For example:
+
+```text
+Google Drive remote:
+  direct delete
+  delete old files
+  delete excessive files
+  empty trash
+
+Mega remote:
+  trash/default delete behavior
+  delete old files
+  delete excessive files
+  do not empty trash
+
+OneDrive remote:
+  skip age-based old-file cleanup
+  still enforce max_files/max_size
+  direct delete
+  do not empty trash
+```
 
 ---
 
 ## Features
 
 - Uploads CCTV/Shinobi recordings to multiple `rclone` remotes.
-- Supports different upload commands per destination:
-  - `copy`
-  - `sync`
-  - `move`
+- Supports `rclone copy`, `rclone sync`, and `rclone move`.
 - Supports different upload options per remote.
 - Cleans old files from remote camera folders.
-- Can delete old files based on age.
-- Can delete excess files based on:
-  - maximum number of files
-  - maximum folder size
-  - or both
-- Deletes oldest files first when enforcing `max_files` or `max_size`.
-- Can choose direct delete or trash/backend-default delete per camera folder.
-- Can optionally empty trash per upload remote with `rclone cleanup`.
-- Prints a startup summary before cleanup/upload starts.
-- Can run cleanup jobs, trash cleanup jobs, and upload jobs in parallel.
+- Cleans excessive files based on:
+  - Maximum number of files
+  - Maximum folder size
+  - Or both
+- Cleanup behavior is configurable per upload remote.
+- Can delete directly or use trash/default backend behavior.
+- Can optionally empty remote trash with `rclone cleanup`.
+- Can run cleanup jobs in parallel.
+- Can run trash cleanup jobs in parallel.
+- Can run upload jobs in parallel.
 - Uses a lock file to prevent multiple script instances from running at the same time.
 - Handles missing remote folders without failing the whole script.
-- Streams upload output live so progress can be seen in terminal, cron logs, or systemd logs.
+- Shows a startup summary before doing any cleanup or upload.
+- Streams upload output live to terminal, cron logs, or systemd logs.
 
 ---
 
@@ -58,26 +159,25 @@ The script is designed for setups where one local CCTV directory is copied, sync
 The script runs in this order:
 
 1. **Startup summary**
-   - Prints configured thread limits.
-   - Prints all upload destinations.
-   - Prints all configured camera cleanup rules.
-   - Prints every generated cleanup target.
-   - Shows whether each target will delete old files, delete excess files, use direct delete, use trash/default behavior, and so on.
+   - Prints all configured camera folder rules.
+   - Prints all upload remotes.
+   - Prints all generated cleanup targets.
+   - Prints whether each remote will delete old files, delete excess files, use direct delete, use trash/default behavior, and empty trash.
 
 2. **Remote camera folder cleanup**
-   - For each configured upload remote and each configured camera folder, the script builds a full cleanup path.
-   - It can delete files older than the configured age.
-   - It can delete oldest files until `max_files` and/or `max_size` limits are satisfied.
-   - Missing remote folders are skipped.
+   - Builds full cleanup paths by combining every upload remote with every camera folder.
+   - Optionally deletes files older than `DELETE_MIN_AGE`.
+   - Optionally lists files and creates a delete list for files above `max_files` or `max_size`.
+   - Deletes oldest files first until limits are satisfied.
 
 3. **Remote trash cleanup**
-   - Runs `rclone cleanup` on upload remotes where `empty_trash=True`.
+   - Runs `rclone cleanup` for upload remotes where `empty_trash=True`.
    - Skips remotes where `empty_trash=False`.
-   - Unsupported `rclone cleanup` is treated as non-fatal.
+   - Treats unsupported `rclone cleanup` as non-fatal.
 
 4. **Upload**
-   - Runs the configured upload command from the local CCTV folder to each configured remote.
-   - Uploads happen in parallel according to `UPLOAD_THREADS`.
+   - Runs `rclone copy`, `rclone sync`, or `rclone move` from the local CCTV folder to each configured remote.
+   - Upload jobs run in parallel according to `UPLOAD_THREADS`.
 
 The script will **not upload new files** if cleanup or trash cleanup has a real failure.
 
@@ -105,55 +205,48 @@ rclone listremotes
 
 ---
 
-## GitHub-Safe Example Layout
+## Example Generated Cleanup Targets
 
-This README uses generic example names only.
+If you configure:
 
-Example local CCTV folder:
-
-```bash
-/path/to/local/CCTV
+```python
+RCLONE_DIRECTORIES = [
+    RcloneDirectory(
+        path="Home/Camera01",
+        max_files=80,
+    ),
+    RcloneDirectory(
+        path="Home/Camera02",
+        max_size="50G",
+    ),
+]
 ```
 
-Example upload destinations:
+and:
 
-```bash
-Example-GoogleDrive-Encrypted:/CCTV
-Example-Mega-Encrypted:/CCTV
-Example-OneDrive-Encrypted:/CCTV
+```python
+UPLOAD_DIRECTORIES = [
+    UploadDirectory(
+        local_path="/path/to/local/CCTV",
+        remote_path="Example-GoogleDrive-Encrypted:/CCTV",
+        copy_options=[],
+    ),
+    UploadDirectory(
+        local_path="/path/to/local/CCTV",
+        remote_path="Example-Mega-Encrypted:/CCTV",
+        copy_options=[],
+    ),
+]
 ```
 
-Example camera folders below each remote:
+the script generates these cleanup targets:
 
-```bash
-Home/Camera01
-Home/Camera02
-Garage/Camera03
-Outdoor/Camera04
-```
-
-The script combines every upload remote with every camera folder.
-
-Example generated cleanup targets:
-
-```bash
+```text
 Example-GoogleDrive-Encrypted:/CCTV/Home/Camera01
 Example-GoogleDrive-Encrypted:/CCTV/Home/Camera02
-Example-GoogleDrive-Encrypted:/CCTV/Garage/Camera03
-Example-GoogleDrive-Encrypted:/CCTV/Outdoor/Camera04
-
 Example-Mega-Encrypted:/CCTV/Home/Camera01
 Example-Mega-Encrypted:/CCTV/Home/Camera02
-Example-Mega-Encrypted:/CCTV/Garage/Camera03
-Example-Mega-Encrypted:/CCTV/Outdoor/Camera04
-
-Example-OneDrive-Encrypted:/CCTV/Home/Camera01
-Example-OneDrive-Encrypted:/CCTV/Home/Camera02
-Example-OneDrive-Encrypted:/CCTV/Garage/Camera03
-Example-OneDrive-Encrypted:/CCTV/Outdoor/Camera04
 ```
-
-With 3 upload remotes and 4 camera folders, the script processes 12 cleanup targets.
 
 ---
 
@@ -163,109 +256,82 @@ Configuration is currently done directly inside the Python script.
 
 ---
 
-## Camera Folder Cleanup List
+## Camera Folder Rules: `RCLONE_DIRECTORIES`
 
-Example:
+Example with four folders:
 
 ```python
 RCLONE_DIRECTORIES = [
     RcloneDirectory(
         path="Home/Camera01",
         max_files=80,
-        delete_old_files=True,
-        delete_excess_files=True,
-        delete_to_trash=False,
     ),
     RcloneDirectory(
         path="Home/Camera02",
         max_size="50G",
-        delete_old_files=True,
-        delete_excess_files=True,
-        delete_to_trash=True,
     ),
     RcloneDirectory(
         path="Garage/Camera03",
         max_files=120,
-        delete_old_files=False,
-        delete_excess_files=True,
-        delete_to_trash=False,
     ),
     RcloneDirectory(
-        path="Outdoor/Camera04",
-        max_size="30G",
-        delete_old_files=True,
-        delete_excess_files=False,
-        delete_to_trash=True,
+        path="Outside/Camera04",
+        max_files=200,
+        max_size="100G",
     ),
 ]
 ```
 
-Each entry defines one camera folder below each remote destination.
-
 | Option | Meaning |
 |---|---|
-| `path` | Camera folder path relative to the remote root |
-| `max_files` | Maximum number of newest files to keep |
-| `max_size` | Maximum total folder size to keep, for example `"30G"` or `"500M"` |
-| `delete_old_files` | Whether to delete files older than `DELETE_MIN_AGE` |
-| `delete_excess_files` | Whether to enforce `max_files` and/or `max_size` |
-| `delete_to_trash` | Whether to use trash/backend-default delete behavior instead of direct-delete mode |
+| `path` | Camera folder path relative to the upload remote root |
+| `max_files` | Number of newest files to keep |
+| `max_size` | Maximum total folder size to keep, such as `"50G"` or `"500M"` |
 
-### Cleanup Examples
-
-Keep only the newest 80 files and delete directly where supported:
+### `max_files`
 
 ```python
 RcloneDirectory(
     path="Home/Camera01",
     max_files=80,
-    delete_old_files=True,
-    delete_excess_files=True,
-    delete_to_trash=False,
 )
 ```
 
-Keep the folder under 50 GiB and use trash/backend-default behavior:
+This keeps the newest 80 files and deletes older excessive files if excess cleanup is enabled for the upload remote.
+
+### `max_size`
 
 ```python
 RcloneDirectory(
     path="Home/Camera02",
     max_size="50G",
-    delete_old_files=True,
-    delete_excess_files=True,
-    delete_to_trash=True,
 )
 ```
 
-Skip age-based deletion, but still enforce a maximum number of files:
+This deletes oldest files until the folder is below 50 GiB if excess cleanup is enabled for the upload remote.
+
+### `max_files` and `max_size` together
 
 ```python
 RcloneDirectory(
-    path="Garage/Camera03",
-    max_files=120,
-    delete_old_files=False,
-    delete_excess_files=True,
-    delete_to_trash=False,
+    path="Outside/Camera04",
+    max_files=200,
+    max_size="100G",
 )
 ```
 
-Delete old files by age, but do not enforce `max_files` or `max_size`:
+This deletes oldest files until both conditions are satisfied:
 
-```python
-RcloneDirectory(
-    path="Outdoor/Camera04",
-    max_size="30G",
-    delete_old_files=True,
-    delete_excess_files=False,
-    delete_to_trash=True,
-)
+```text
+file count <= 200
+folder size <= 100G
 ```
 
 ---
 
-## Upload Destinations
+## Upload Destinations: `UPLOAD_DIRECTORIES`
 
-Example:
+Example with three upload remotes:
 
 ```python
 UPLOAD_DIRECTORIES = [
@@ -273,6 +339,9 @@ UPLOAD_DIRECTORIES = [
         local_path="/path/to/local/CCTV",
         remote_path="Example-GoogleDrive-Encrypted:/CCTV",
         upload_command="copy",
+        delete_old_files=True,
+        delete_excess_files=True,
+        delete_to_trash=False,
         empty_trash=True,
         copy_options=[
             "--max-age", "3h",
@@ -285,7 +354,10 @@ UPLOAD_DIRECTORIES = [
     UploadDirectory(
         local_path="/path/to/local/CCTV",
         remote_path="Example-Mega-Encrypted:/CCTV",
-        upload_command="sync",
+        upload_command="copy",
+        delete_old_files=True,
+        delete_excess_files=True,
+        delete_to_trash=True,
         empty_trash=False,
         copy_options=[
             "--max-age", "3h",
@@ -298,15 +370,17 @@ UPLOAD_DIRECTORIES = [
     UploadDirectory(
         local_path="/path/to/local/CCTV",
         remote_path="Example-OneDrive-Encrypted:/CCTV",
-        upload_command="move",
+        upload_command="sync",
+        delete_old_files=False,
+        delete_excess_files=True,
+        delete_to_trash=False,
         empty_trash=False,
         copy_options=[
             "--max-age", "3h",
             "--stats", "10s",
             "--stats-one-line",
-            "--transfers", "2",
+            "--transfers", "4",
             "--exclude", "/Home/OldCamera/**",
-            "--dry-run",
         ],
     ),
 ]
@@ -315,29 +389,113 @@ UPLOAD_DIRECTORIES = [
 | Option | Meaning |
 |---|---|
 | `local_path` | Local source folder to upload from |
-| `remote_path` | Remote destination path |
-| `upload_command` | Which `rclone` upload command to use: `copy`, `sync`, or `move` |
+| `remote_path` | Remote destination root |
+| `upload_command` | Rclone command used for upload: `copy`, `sync`, or `move` |
+| `delete_old_files` | Whether to delete files older than `DELETE_MIN_AGE` on this remote |
+| `delete_excess_files` | Whether to enforce `max_files` / `max_size` cleanup on this remote |
+| `delete_to_trash` | Whether delete operations should use trash/default backend behavior |
 | `empty_trash` | Whether to run `rclone cleanup` for this remote |
-| `copy_options` | Extra options passed to the selected `rclone` upload command |
-
-> [!CAUTION]
-> `upload_command="sync"` can delete files from the destination if they are not present in the source.
->
-> `upload_command="move"` can delete local source files after successful transfer.
->
-> For backup-style CCTV upload, `upload_command="copy"` is usually the safest default.
+| `copy_options` | Extra options passed to the upload command |
 
 ---
 
-## Upload Command Choices
+## Delete Behavior
 
-| Command | Behavior | Risk |
-|---|---|---|
-| `copy` | Copies new/changed files to the destination | Safest for backups |
-| `sync` | Makes destination match source | Can delete remote files |
-| `move` | Moves files to destination and removes local source files after transfer | Can delete local files |
+### `DELETE_MIN_AGE`
 
-The script validates the command against this list:
+```python
+DELETE_MIN_AGE = "31d"
+```
+
+This is used when:
+
+```python
+delete_old_files=True
+```
+
+The script runs a command similar to:
+
+```bash
+rclone delete remote:/path --min-age 31d
+```
+
+If `delete_to_trash=False`, it adds:
+
+```bash
+--drive-use-trash=false
+```
+
+---
+
+## Direct Delete vs Trash/Default Delete
+
+### Direct delete
+
+```python
+delete_to_trash=False
+```
+
+The script adds:
+
+```bash
+--drive-use-trash=false
+```
+
+This means direct/permanent delete where supported.
+
+> [!CAUTION]
+> Direct delete can bypass cloud trash/recycle bin and may be unrecoverable.
+
+### Trash/default backend behavior
+
+```python
+delete_to_trash=True
+```
+
+The script does **not** add:
+
+```bash
+--drive-use-trash=false
+```
+
+This lets the `rclone` backend use its default delete behavior.
+
+Depending on the backend, that may mean files go to trash/recycle bin.
+
+---
+
+## Empty Trash / `rclone cleanup`
+
+### Enabled
+
+```python
+empty_trash=True
+```
+
+The script runs:
+
+```bash
+rclone cleanup remote:/path
+```
+
+### Disabled
+
+```python
+empty_trash=False
+```
+
+The script skips `rclone cleanup` for that remote.
+
+> [!NOTE]
+> Not every `rclone` backend supports `rclone cleanup`.
+>
+> The script treats unsupported cleanup as non-fatal and continues.
+
+---
+
+## Upload Commands
+
+The script intentionally allows only:
 
 ```python
 ALLOWED_UPLOAD_COMMANDS = {
@@ -347,144 +505,78 @@ ALLOWED_UPLOAD_COMMANDS = {
 }
 ```
 
----
+This avoids accidentally using destructive commands such as `delete` or `purge` as an upload command.
 
-## Delete Age
-
-Age-based cleanup uses:
+### `copy`
 
 ```python
-DELETE_MIN_AGE = "31d"
+upload_command="copy"
 ```
 
-This means files older than 31 days can be deleted when `delete_old_files=True`.
+Uploads new/changed files and normally does not delete extra files from the destination.
 
-Examples:
+This is usually the safest option for CCTV backup.
+
+### `sync`
 
 ```python
-DELETE_MIN_AGE = "7d"
-DELETE_MIN_AGE = "31d"
-DELETE_MIN_AGE = "6M"
+upload_command="sync"
 ```
 
-The exact supported duration format depends on `rclone`.
+Makes the destination match the source.
 
----
+> [!WARNING]
+> `rclone sync` can delete files from the destination if they are not present locally.
 
-## Direct Delete vs Trash Delete
-
-Per camera folder:
+### `move`
 
 ```python
-delete_to_trash=False
+upload_command="move"
 ```
 
-means the script adds direct-delete options where supported, for example:
+Uploads files and removes the local source files after successful transfer.
 
-```bash
---drive-use-trash=false
-```
-
-Per camera folder:
-
-```python
-delete_to_trash=True
-```
-
-means the script does not add the direct-delete option. The backend/default trash behavior is used where supported.
-
-| Option | Meaning |
-|---|---|
-| `delete_to_trash=False` | Direct/permanent delete where supported |
-| `delete_to_trash=True` | Use backend/default trash behavior where supported |
-
-> [!CAUTION]
-> Direct delete can make files unrecoverable.
+> [!WARNING]
+> `rclone move` can delete local CCTV recordings after upload.
 >
-> Trash behavior depends on the rclone backend and cloud provider.
-
----
-
-## Empty Trash / `rclone cleanup`
-
-Per upload remote:
-
-```python
-empty_trash=True
-```
-
-means the script runs:
-
-```bash
-rclone cleanup RemoteName:/Path
-```
-
-Per upload remote:
-
-```python
-empty_trash=False
-```
-
-means the script skips `rclone cleanup` for that remote.
-
-Some backends do not support `rclone cleanup`. The script treats unsupported cleanup as non-fatal.
+> Use this only if you really want local files removed.
 
 ---
 
 ## Thread Limits
 
 ```python
-UPLOAD_THREADS = 3
-CLEANUP_THREADS = 3
-TRASH_CLEANUP_THREADS = 3
+UPLOAD_THREADS = 2
+CLEANUP_THREADS = 2
+TRASH_CLEANUP_THREADS = 2
 ```
 
 | Option | Meaning |
 |---|---|
 | `UPLOAD_THREADS` | Number of parallel upload jobs |
-| `CLEANUP_THREADS` | Number of parallel camera-folder cleanup jobs |
+| `CLEANUP_THREADS` | Number of parallel generated cleanup target jobs |
 | `TRASH_CLEANUP_THREADS` | Number of parallel trash-cleanup jobs |
 
 Lower these values if your machine, disk, network, or cloud providers become overloaded.
-
-> [!NOTE]
-> `UPLOAD_THREADS` controls how many `rclone` upload processes run at once.
->
-> `--transfers` controls how many files each `rclone` process transfers at once.
->
-> Example:
->
-> ```text
-> UPLOAD_THREADS = 3
-> --transfers 4
-> ```
->
-> This can create up to about 12 active file transfers.
 
 ---
 
 ## Startup Summary
 
-Before doing cleanup or upload, the script prints a startup summary.
+Before running cleanup or upload, the script prints a summary showing:
 
-It shows:
+- Thread limits
+- Global cleanup settings
+- Camera folder rules
+- Upload destinations
+- Upload commands
+- Per-remote cleanup behavior
+- Generated cleanup targets
+- Delete mode
+- Empty trash setting
+- Total number of targets
 
-- thread limits
-- all upload destinations
-- upload command for each destination
-- whether each destination will empty trash
-- all camera cleanup rules
-- all generated cleanup targets
-- delete-old-files setting
-- delete-excess-files setting
-- `max_files`
-- `max_size`
-- delete mode
-- total number of upload destinations
-- total number of camera rules
-- total number of cleanup targets
-
-This helps catch wrong paths before the script starts doing destructive operations.
+This helps verify the script before it starts deleting or uploading files.
 
 ---
 
@@ -539,31 +631,31 @@ Before using the script on important data, test your `rclone` remotes manually.
 List a remote:
 
 ```bash
-rclone lsf Example-OneDrive-Encrypted:/CCTV
+rclone lsf Example-GoogleDrive-Encrypted:/CCTV
 ```
 
 Test upload to a temporary folder:
 
 ```bash
-rclone copy /path/to/test/files Example-OneDrive-Encrypted:/CCTV-Test --dry-run
+rclone copy /path/to/test/files Example-GoogleDrive-Encrypted:/CCTV-Test --dry-run
 ```
 
 Test delete behavior on a temporary folder only:
 
 ```bash
-rclone delete Example-OneDrive-Encrypted:/CCTV-Test --min-age 31d --dry-run
+rclone delete Example-GoogleDrive-Encrypted:/CCTV-Test --min-age 31d --dry-run
 ```
 
-Test size/listing behavior:
+Test direct delete behavior on temporary data only:
 
 ```bash
-rclone lsf --files-only --format tsp --separator $'\t' Example-OneDrive-Encrypted:/CCTV-Test
+rclone delete Example-GoogleDrive-Encrypted:/CCTV-Test --min-age 31d --drive-use-trash=false --dry-run
 ```
 
 > [!IMPORTANT]
 > The script does not currently have a global `--dry-run` argument.
 >
-> For testing, temporarily add `--dry-run` to relevant `copy_options`, or temporarily add it to the delete commands in the script.
+> To test safely, temporarily add `--dry-run` to the relevant `copy_options`, or add it to delete commands in the script while testing.
 
 ---
 
@@ -663,77 +755,6 @@ journalctl -u rclone-cctv.service -f
 
 ---
 
-## Important Safety Notes
-
-### This Script Deletes Remote Files
-
-The script performs remote cleanup before upload. If paths are wrong, it may delete files from the wrong remote folder.
-
-Carefully check:
-
-```python
-RCLONE_DIRECTORIES
-UPLOAD_DIRECTORIES
-DELETE_MIN_AGE
-delete_to_trash
-empty_trash
-upload_command
-```
-
-### Path Mistakes Can Be Dangerous
-
-This is specific:
-
-```bash
-Example-OneDrive-Encrypted:/CCTV/Home/Camera01
-```
-
-This is much broader:
-
-```bash
-Example-OneDrive-Encrypted:/
-```
-
-A wrong path can cause unwanted cleanup or deletion.
-
-### `sync` Can Delete Remote Files
-
-If you use:
-
-```python
-upload_command="sync"
-```
-
-then files that do not exist in the source can be deleted from the destination.
-
-### `move` Can Delete Local Files
-
-If you use:
-
-```python
-upload_command="move"
-```
-
-then files may be removed from the local source after successful transfer.
-
-### Direct Delete Can Be Permanent
-
-If you use:
-
-```python
-delete_to_trash=False
-```
-
-then the script may bypass trash/recycle bin behavior where supported.
-
-### Retention Uses Modified Time
-
-For `max_files` and `max_size`, the script gets file entries using `rclone lsf` with modified time and size information.
-
-It deletes the oldest files first based on the modified timestamp returned by `rclone`.
-
----
-
 ## Troubleshooting
 
 ### Lock File Exists
@@ -781,7 +802,7 @@ rclone cleanup
 
 The script treats unsupported cleanup as non-fatal and continues.
 
-You can disable cleanup per remote:
+Disable empty trash for that remote if desired:
 
 ```python
 empty_trash=False
@@ -795,45 +816,90 @@ Check the output from the failed upload job.
 
 Common causes:
 
-- wrong remote name
-- expired cloud login/token
-- network problem
-- cloud provider rate limit
-- local folder path does not exist
-- not enough permissions
-- not enough cloud storage space
-- `sync` deleting more than expected
-- `move` removing local files after transfer
+- Wrong remote name
+- Expired cloud login/token
+- Network problem
+- Cloud provider rate limit
+- Local folder path does not exist
+- Not enough permissions
+- Not enough storage space
 
-Test the remote manually:
+Test manually:
 
 ```bash
-rclone lsf RemoteName:/Path
-```
-
-Test the local path:
-
-```bash
-ls -ld /path/to/local/CCTV
+rclone lsf Example-GoogleDrive-Encrypted:/CCTV
 ```
 
 ---
 
-### Delete List Looks Wrong
+## Important Safety Notes
 
-The script writes temporary delete lists to:
+### This Script Deletes Remote Files
+
+The script performs remote cleanup before upload.
+
+Carefully check:
 
 ```python
-DELETE_LIST_DIR = Path("/root/rclone")
+RCLONE_DIRECTORIES
+UPLOAD_DIRECTORIES
+DELETE_MIN_AGE
+delete_to_trash
+empty_trash
+upload_command
 ```
 
-These files are named like:
+### Path Mistakes Can Be Dangerous
 
-```text
-to-delete-Example-OneDrive-Encrypted__CCTV_Home_Camera01
+This is specific:
+
+```bash
+Example-OneDrive-Encrypted:/CCTV/Home/Camera01
 ```
 
-You can inspect them before running a real deletion if you are testing.
+This is broad and dangerous:
+
+```bash
+Example-OneDrive-Encrypted:/
+```
+
+A wrong path can cause unwanted cleanup or deletion.
+
+### `sync` Can Delete Destination Files
+
+If you use:
+
+```python
+upload_command="sync"
+```
+
+then destination files not present in the local source may be deleted.
+
+### `move` Can Delete Local Files
+
+If you use:
+
+```python
+upload_command="move"
+```
+
+then local files may be removed after successful upload.
+
+### Direct Delete Can Be Permanent
+
+If you use:
+
+```python
+delete_to_trash=False
+```
+
+then delete commands add:
+
+```bash
+--drive-use-trash=false
+```
+
+This may make deleted files unrecoverable.
 
 ---
 
@@ -854,10 +920,8 @@ You can inspect them before running a real deletion if you are testing.
 - No email, MQTT, or Home Assistant notification support.
 - Remote cleanup happens before upload.
 - If cleanup fails, upload is skipped.
-- If trash cleanup has a real failure, upload is skipped.
-- Some rclone backends may not support all options.
-- Trash behavior differs between cloud providers.
-- `rclone cleanup` support differs between cloud providers.
+- Some `rclone` backends may not support all options.
+- Some `rclone` backends may treat trash/delete behavior differently.
 
 ---
 
@@ -872,7 +936,7 @@ By using this software, you agree that:
 - You are responsible for your own files and backups.
 - You are responsible for checking all paths and remotes.
 - You are responsible for testing with safe data first.
-- You are responsible for any data loss, deletion, corruption, cloud account issues, local file loss, or other damage.
+- You are responsible for any data loss, deletion, corruption, cloud account issues, or other damage.
 - The author and contributors are not liable for any damages caused by use or misuse of this script.
 
 Do not use this script on important data unless you have verified backups and understand exactly what it will do.
