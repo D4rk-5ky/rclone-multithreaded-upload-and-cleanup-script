@@ -10,7 +10,7 @@
 #   1. Builds remote cleanup targets from:
 #        UPLOAD_DIRECTORIES remote_path
 #        +
-#        RCLONE_DIRECTORIES camera folder paths
+#        DIRECTORY_CLEANUP_RULES camera folder paths
 #
 #   2. Cleans remote camera folders:
 #        - optionally delete files older than DELETE_MIN_AGE
@@ -21,7 +21,7 @@
 #   4. Uploads local CCTV files to multiple remotes using rclone copy/sync/move.
 #
 # Important design:
-#   - RCLONE_DIRECTORIES controls folder names and retention limits.
+#   - DIRECTORY_CLEANUP_RULES controls folder names and retention limits.
 #   - UPLOAD_DIRECTORIES controls remote/cloud behavior:
 #       delete_old_files
 #       delete_excess_files
@@ -51,7 +51,7 @@ import threading
 # =============================================================================
 
 @dataclass
-class RcloneDirectory:
+class DirectoryCleanupRule:
     """
     One camera/folder rule.
 
@@ -90,7 +90,7 @@ class UploadDirectory:
     delete_excess_files: bool = True
 
     # Optional total size limit for this upload remote.
-    # This is checked across all configured RCLONE_DIRECTORIES below this
+    # This is checked across all configured DIRECTORY_CLEANUP_RULES below this
     # upload.remote_path. It does not inspect unrelated folders outside the
     # configured camera folders.
     #
@@ -114,9 +114,9 @@ class CleanupTarget:
     This is created by combining:
       UploadDirectory.remote_path
       +
-      RcloneDirectory.path
+      DirectoryCleanupRule.path
 
-    Retention limits come from RcloneDirectory.
+    Retention limits come from DirectoryCleanupRule.
     Delete behavior comes from UploadDirectory.
     """
     path: str
@@ -156,27 +156,27 @@ class RemoteQuotaFile:
 #
 # Keep this section free of private rclone remote names.
 # These are relative folder paths only.
-RCLONE_DIRECTORIES = [
+DIRECTORY_CLEANUP_RULES = [
     # Example 1: keep newest 80 files.
-    RcloneDirectory(
+    DirectoryCleanupRule(
         path="Home/Camera01",
         max_files=80,
     ),
 
     # Example 2: keep this camera folder below 50 GiB.
-    RcloneDirectory(
+    DirectoryCleanupRule(
         path="Home/Camera02",
         max_size="50G",
     ),
 
     # Example 3: keep newest 120 files.
-    RcloneDirectory(
+    DirectoryCleanupRule(
         path="Garage/Camera03",
         max_files=120,
     ),
 
     # Example 4: enforce both max file count and max size.
-    RcloneDirectory(
+    DirectoryCleanupRule(
         path="Outside/Camera04",
         max_files=200,
         max_size="100G",
@@ -580,13 +580,13 @@ def build_cleanup_directories() -> list[CleanupTarget]:
     """
     Build cleanup targets from every upload remote and every camera folder.
 
-    Retention limits come from RCLONE_DIRECTORIES.
+    Retention limits come from DIRECTORY_CLEANUP_RULES.
     Delete behavior comes from UPLOAD_DIRECTORIES.
     """
     cleanup_directories: list[CleanupTarget] = []
 
     for upload in UPLOAD_DIRECTORIES:
-        for directory in RCLONE_DIRECTORIES:
+        for directory in DIRECTORY_CLEANUP_RULES:
             cleanup_directories.append(
                 CleanupTarget(
                     path=join_rclone_remote_path(upload.remote_path, directory.path),
@@ -629,8 +629,8 @@ def print_startup_summary(cleanup_directories: list[CleanupTarget]):
         print(f"  Delete-list folder : {DELETE_LIST_DIR}")
 
         print()
-        print("Camera folder rules:")
-        for index, directory in enumerate(RCLONE_DIRECTORIES, start=1):
+        print("Directory cleanup rules:")
+        for index, directory in enumerate(DIRECTORY_CLEANUP_RULES, start=1):
             print(f"  Camera rule {index}:")
             print(f"    Relative path : {directory.path}")
             print(f"    Max files     : {directory.max_files}")
@@ -675,11 +675,11 @@ def print_startup_summary(cleanup_directories: list[CleanupTarget]):
             print(f"    Enabled        : {upload.delete_excess_files and upload.max_total_size is not None}")
             print(f"    Max total size : {upload.max_total_size}")
             print(f"    Delete mode    : {get_delete_mode_text(upload)}")
-            print(f"    Counts folders : {[directory.path for directory in RCLONE_DIRECTORIES]}")
+            print(f"    Counts folders        : {[directory.path for directory in DIRECTORY_CLEANUP_RULES]}")
 
         print()
         print(f"Total upload destinations : {len(UPLOAD_DIRECTORIES)}")
-        print(f"Total camera rules        : {len(RCLONE_DIRECTORIES)}")
+        print(f"Total directory cleanup rules   : {len(DIRECTORY_CLEANUP_RULES)}")
         print(f"Total cleanup targets     : {len(cleanup_directories)}")
 
         print(OUTPUT_SEPARATOR)
@@ -845,12 +845,12 @@ def get_upload_remote_quota_entries(upload: UploadDirectory) -> list[RemoteQuota
     """
     Get all managed files below one upload remote across all configured camera folders.
 
-    This only counts folders listed in RCLONE_DIRECTORIES.
+    This only counts folders listed in DIRECTORY_CLEANUP_RULES.
     It does not count unrelated folders/files elsewhere in the cloud account.
     """
     all_files: list[RemoteQuotaFile] = []
 
-    for directory in RCLONE_DIRECTORIES:
+    for directory in DIRECTORY_CLEANUP_RULES:
         full_remote_path = join_rclone_remote_path(upload.remote_path, directory.path)
         entries = get_remote_file_entries(full_remote_path)
 
@@ -1098,7 +1098,7 @@ def cleanup_one_directory(job_number: int, target: CleanupTarget) -> bool:
 
 def cleanup_one_upload_remote_quota(job_number: int, upload: UploadDirectory) -> bool:
     """
-    Enforce upload.max_total_size across all configured RCLONE_DIRECTORIES
+    Enforce upload.max_total_size across all configured DIRECTORY_CLEANUP_RULES
     below upload.remote_path.
     """
     print_job_block(
