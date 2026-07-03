@@ -24,8 +24,7 @@ The project includes a `.gitignore` that ignores common private config files, lo
 > That may bypass cloud trash/recycle bin and make deleted files unrecoverable.
 >
 > Test with non-important data first. Review every path and remote before using real CCTV data.
-
-⚠️ AI-assisted / vibe-coded experimental software. Use at your own risk.
+> ⚠️ AI-assisted / vibe-coded experimental software. Use at your own risk.
 
 ## What the Script Does
 
