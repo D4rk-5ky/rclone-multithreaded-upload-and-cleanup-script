@@ -1,0 +1,99 @@
+{
+  "delete_min_age": "31d",
+  "lock_file": "/var/lock/subsys/RcloneLockFile.run",
+  "delete_list_dir": "/root/rclone",
+  "sleep_after_step": 5,
+  "thread_limits": {
+    "upload_threads": 2,
+    "cleanup_threads": 2,
+    "remote_quota_cleanup_threads": 2,
+    "trash_cleanup_threads": 2
+  },
+  "directory_cleanup_rules": [
+    {
+      "path": "Home/Camera01",
+      "max_files": 80,
+      "max_size": null
+    },
+    {
+      "path": "Home/Camera02",
+      "max_files": null,
+      "max_size": "50G"
+    },
+    {
+      "path": "Garage/Camera03",
+      "max_files": 120,
+      "max_size": null
+    },
+    {
+      "path": "Outside/Camera04",
+      "max_files": 200,
+      "max_size": "100G"
+    }
+  ],
+  "upload_directories": [
+    {
+      "local_path": "/path/to/local/CCTV",
+      "remote_path": "Example-GoogleDrive-Encrypted:/CCTV",
+      "upload_command": "copy",
+      "delete_old_files": true,
+      "delete_excess_files": true,
+      "max_total_size": "500G",
+      "delete_to_trash": false,
+      "empty_trash": true,
+      "copy_options": [
+        "--max-age",
+        "3h",
+        "--stats",
+        "10s",
+        "--stats-one-line",
+        "--transfers",
+        "4",
+        "--exclude",
+        "/Home/OldCamera/**"
+      ]
+    },
+    {
+      "local_path": "/path/to/local/CCTV",
+      "remote_path": "Example-Mega-Encrypted:/CCTV",
+      "upload_command": "copy",
+      "delete_old_files": true,
+      "delete_excess_files": true,
+      "max_total_size": "250G",
+      "delete_to_trash": true,
+      "empty_trash": false,
+      "copy_options": [
+        "--max-age",
+        "3h",
+        "--stats",
+        "10s",
+        "--stats-one-line",
+        "--transfers",
+        "4",
+        "--exclude",
+        "/Home/OldCamera/**"
+      ]
+    },
+    {
+      "local_path": "/path/to/local/CCTV",
+      "remote_path": "Example-OneDrive-Encrypted:/CCTV",
+      "upload_command": "sync",
+      "delete_old_files": false,
+      "delete_excess_files": true,
+      "max_total_size": "1T",
+      "delete_to_trash": false,
+      "empty_trash": false,
+      "copy_options": [
+        "--max-age",
+        "3h",
+        "--stats",
+        "10s",
+        "--stats-one-line",
+        "--transfers",
+        "4",
+        "--exclude",
+        "/Home/OldCamera/**"
+      ]
+    }
+  ]
+}

@@ -4,23 +4,26 @@
 # Rclone CCTV Multi-Remote Upload and Cleanup Script
 # =============================================================================
 #
-# GitHub-safe example version.
+# GitHub-safe external-config version.
 #
 # What this script does:
-#   1. Builds remote cleanup targets from:
+#   1. Loads settings from a JSON config file passed with --config/-c.
+#
+#   2. Builds remote cleanup targets from:
 #        UPLOAD_DIRECTORIES remote_path
 #        +
 #        DIRECTORY_CLEANUP_RULES camera folder paths
 #
-#   2. Cleans remote camera folders:
+#   3. Cleans remote camera folders:
 #        - optionally delete files older than DELETE_MIN_AGE
 #        - optionally delete oldest files until max_files/max_size is satisfied
 #
-#   3. Optionally runs "rclone cleanup" per upload remote.
+#   4. Optionally runs "rclone cleanup" per upload remote.
 #
-#   4. Uploads local CCTV files to multiple remotes using rclone copy/sync/move.
+#   5. Uploads local CCTV files to multiple remotes using rclone copy/sync/move.
 #
 # Important design:
+#   - Runtime settings live in the external JSON config file.
 #   - DIRECTORY_CLEANUP_RULES controls folder names and retention limits.
 #   - UPLOAD_DIRECTORIES controls remote/cloud behavior:
 #       delete_old_files
@@ -34,7 +37,9 @@
 #   Test with safe data and/or --dry-run before using on important data.
 # =============================================================================
 
+import argparse
 import atexit
+import json
 import os
 import signal
 import subprocess
@@ -44,6 +49,9 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 import threading
+
+
+VERSION = "0.0.2"
 
 
 # =============================================================================
@@ -149,149 +157,16 @@ class RemoteQuotaFile:
 
 
 # =============================================================================
-# Configuration
+# Configuration loaded from external JSON file
 # =============================================================================
 
-# Camera folders below each upload remote.
-#
-# Keep this section free of private rclone remote names.
-# These are relative folder paths only.
-DIRECTORY_CLEANUP_RULES = [
-    # Example 1: keep newest 80 files.
-    DirectoryCleanupRule(
-        path="Home/Camera01",
-        max_files=80,
-    ),
-
-    # Example 2: keep this camera folder below 50 GiB.
-    DirectoryCleanupRule(
-        path="Home/Camera02",
-        max_size="50G",
-    ),
-
-    # Example 3: keep newest 120 files.
-    DirectoryCleanupRule(
-        path="Garage/Camera03",
-        max_files=120,
-    ),
-
-    # Example 4: enforce both max file count and max size.
-    DirectoryCleanupRule(
-        path="Outside/Camera04",
-        max_files=200,
-        max_size="100G",
-    ),
-]
-
-
-# Upload destinations.
-#
-# Replace these example remotes and local paths with your real private values.
-#
-# Important:
-#   delete_old_files/delete_excess_files/delete_to_trash/max_total_size
-#   belong here because they are remote/cloud behavior.
-UPLOAD_DIRECTORIES = [
-    # Example remote 1:
-    #   - upload with rclone copy
-    #   - delete old files
-    #   - delete excessive files
-    #   - direct/permanent delete where supported
-    #   - empty trash after cleanup
-    UploadDirectory(
-        local_path="/path/to/local/CCTV",
-        remote_path="Example-GoogleDrive-Encrypted:/CCTV",
-        upload_command="copy",
-        delete_old_files=True,
-        delete_excess_files=True,
-        max_total_size="500G",
-        delete_to_trash=False,
-        empty_trash=True,
-        copy_options=[
-            "--max-age", "3h",
-            "--stats", "10s",
-            "--stats-one-line",
-            "--transfers", "4",
-            "--exclude", "/Home/OldCamera/**",
-        ],
-    ),
-
-    # Example remote 2:
-    #   - upload with rclone copy
-    #   - delete old files
-    #   - delete excessive files
-    #   - use trash/backend default delete behavior
-    #   - do not empty trash
-    UploadDirectory(
-        local_path="/path/to/local/CCTV",
-        remote_path="Example-Mega-Encrypted:/CCTV",
-        upload_command="copy",
-        delete_old_files=True,
-        delete_excess_files=True,
-        max_total_size="250G",
-        delete_to_trash=True,
-        empty_trash=False,
-        copy_options=[
-            "--max-age", "3h",
-            "--stats", "10s",
-            "--stats-one-line",
-            "--transfers", "4",
-            "--exclude", "/Home/OldCamera/**",
-        ],
-    ),
-
-    # Example remote 3:
-    #   - upload with rclone sync
-    #   - skip old-file cleanup
-    #   - still enforce max_files/max_size cleanup
-    #   - direct/permanent delete where supported
-    #   - do not empty trash
-    #
-    # WARNING:
-    #   rclone sync can delete destination files that are not present locally.
-    UploadDirectory(
-        local_path="/path/to/local/CCTV",
-        remote_path="Example-OneDrive-Encrypted:/CCTV",
-        upload_command="sync",
-        delete_old_files=False,
-        delete_excess_files=True,
-        max_total_size="1T",
-        delete_to_trash=False,
-        empty_trash=False,
-        copy_options=[
-            "--max-age", "3h",
-            "--stats", "10s",
-            "--stats-one-line",
-            "--transfers", "4",
-            "--exclude", "/Home/OldCamera/**",
-        ],
-    ),
-
-    # Example for rclone move:
-    #
-    # rclone move uploads files and then removes local source files after
-    # successful transfer. That can be dangerous for CCTV data.
-    #
-    # Keep this commented unless you really want move behavior.
-    #
-    # UploadDirectory(
-    #     local_path="/path/to/local/CCTV",
-    #     remote_path="Example-Archive-Encrypted:/CCTV",
-    #     upload_command="move",
-    #     delete_old_files=False,
-    #     delete_excess_files=False,
-    #     max_total_size=None,
-    #     delete_to_trash=False,
-    #     empty_trash=False,
-    #     copy_options=[
-    #         "--dry-run",
-    #         "--max-age", "3h",
-    #         "--stats", "10s",
-    #         "--stats-one-line",
-    #         "--transfers", "2",
-    #     ],
-    # ),
-]
+# Runtime configuration is intentionally populated from --config/-c.
+# The script no longer contains upload destinations or cleanup folders as
+# hard-coded settings. This keeps private paths/remotes out of the script and
+# makes it safer to reuse the same script with different config files.
+DIRECTORY_CLEANUP_RULES: list[DirectoryCleanupRule] = []
+UPLOAD_DIRECTORIES: list[UploadDirectory] = []
+CONFIG_PATH: Path | None = None
 
 
 # Age used by the optional delete_old_files step.
@@ -309,11 +184,7 @@ ALLOWED_UPLOAD_COMMANDS = {
 }
 
 
-# Thread limits for the three phases.
-#
-# Cleanup jobs clean individual generated camera-folder targets.
-# Trash cleanup jobs run once per upload remote.
-# Upload jobs run once per upload remote.
+# Thread limits for the cleanup, trash, quota, and upload phases.
 UPLOAD_THREADS = 2
 CLEANUP_THREADS = 2
 REMOTE_QUOTA_CLEANUP_THREADS = 2
@@ -517,6 +388,296 @@ def get_delete_mode_text(target: CleanupTarget | UploadDirectory) -> str:
     return "direct/permanent where supported"
 
 
+
+# =============================================================================
+# Config file loading
+# =============================================================================
+
+def parse_cli_args() -> argparse.Namespace:
+    """
+    Parse command-line arguments.
+
+    The config file is required so the script never silently runs with embedded
+    example remotes or old hard-coded paths.
+    """
+    parser = argparse.ArgumentParser(
+        description="Upload CCTV files to rclone remotes and clean managed remote folders.",
+    )
+
+    parser.add_argument(
+        "-c",
+        "--config",
+        required=True,
+        help="Path to JSON config file. The filename extension is not enforced.",
+    )
+
+    parser.add_argument(
+        "--validate-config",
+        action="store_true",
+        help="Load the config, print the startup summary, and exit without lock/rclone commands.",
+    )
+
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {VERSION}",
+    )
+
+    return parser.parse_args()
+
+
+def load_json_config(config_path: Path) -> dict:
+    """
+    Load a JSON config file from any filename extension.
+    """
+    if not config_path.exists():
+        raise FileNotFoundError(f"Config file does not exist: {config_path}")
+
+    if not config_path.is_file():
+        raise ValueError(f"Config path is not a file: {config_path}")
+
+    try:
+        with config_path.open("r", encoding="utf-8") as config_file:
+            loaded_config = json.load(config_file)
+    except json.JSONDecodeError as error:
+        raise ValueError(
+            f"Invalid JSON config in {config_path}: "
+            f"line {error.lineno}, column {error.colno}: {error.msg}"
+        ) from error
+
+    if not isinstance(loaded_config, dict):
+        raise ValueError("Config root must be a JSON object")
+
+    return loaded_config
+
+
+def require_string(section_name: str, data: dict, key: str) -> str:
+    """
+    Read a required string from a config object.
+    """
+    value = data.get(key)
+
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{section_name}.{key} must be a non-empty string")
+
+    return value
+
+
+def optional_string(section_name: str, data: dict, key: str, default: str | None) -> str | None:
+    """
+    Read an optional string or null from a config object.
+    """
+    value = data.get(key, default)
+
+    if value is None:
+        return None
+
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{section_name}.{key} must be a non-empty string or null")
+
+    return value
+
+
+def optional_bool(section_name: str, data: dict, key: str, default: bool) -> bool:
+    """
+    Read an optional boolean from a config object.
+    """
+    value = data.get(key, default)
+
+    if not isinstance(value, bool):
+        raise ValueError(f"{section_name}.{key} must be true or false")
+
+    return value
+
+
+def optional_non_negative_int(section_name: str, data: dict, key: str, default: int) -> int:
+    """
+    Read an optional non-negative integer from a config object.
+    """
+    value = data.get(key, default)
+
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ValueError(f"{section_name}.{key} must be a non-negative integer")
+
+    return value
+
+
+def optional_positive_int_or_none(section_name: str, data: dict, key: str) -> int | None:
+    """
+    Read an optional positive integer or null from a config object.
+    """
+    value = data.get(key)
+
+    if value is None:
+        return None
+
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise ValueError(f"{section_name}.{key} must be a positive integer or null")
+
+    return value
+
+
+def optional_string_list(section_name: str, data: dict, key: str) -> list[str]:
+    """
+    Read an optional list of strings from a config object.
+    """
+    value = data.get(key, [])
+
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        raise ValueError(f"{section_name}.{key} must be a list of strings")
+
+    return value
+
+
+def parse_directory_cleanup_rules(config: dict) -> list[DirectoryCleanupRule]:
+    """
+    Convert config directory_cleanup_rules objects into DirectoryCleanupRule instances.
+    """
+    raw_rules = config.get("directory_cleanup_rules")
+
+    if not isinstance(raw_rules, list):
+        raise ValueError("directory_cleanup_rules must be a list")
+
+    rules: list[DirectoryCleanupRule] = []
+
+    for index, raw_rule in enumerate(raw_rules, start=1):
+        section_name = f"directory_cleanup_rules[{index}]"
+
+        if not isinstance(raw_rule, dict):
+            raise ValueError(f"{section_name} must be an object")
+
+        path = require_string(section_name, raw_rule, "path")
+        max_files = optional_positive_int_or_none(section_name, raw_rule, "max_files")
+        max_size = optional_string(section_name, raw_rule, "max_size", None)
+
+        if max_size is not None:
+            parse_size_to_bytes(max_size)
+
+        rules.append(
+            DirectoryCleanupRule(
+                path=path,
+                max_files=max_files,
+                max_size=max_size,
+            )
+        )
+
+    return rules
+
+
+def parse_upload_directories(config: dict) -> list[UploadDirectory]:
+    """
+    Convert config upload_directories objects into UploadDirectory instances.
+    """
+    raw_uploads = config.get("upload_directories")
+
+    if not isinstance(raw_uploads, list) or not raw_uploads:
+        raise ValueError("upload_directories must be a non-empty list")
+
+    uploads: list[UploadDirectory] = []
+
+    for index, raw_upload in enumerate(raw_uploads, start=1):
+        section_name = f"upload_directories[{index}]"
+
+        if not isinstance(raw_upload, dict):
+            raise ValueError(f"{section_name} must be an object")
+
+        local_path = require_string(section_name, raw_upload, "local_path")
+        remote_path = require_string(section_name, raw_upload, "remote_path")
+        upload_command = validate_upload_command(
+            optional_string(section_name, raw_upload, "upload_command", "copy")
+        )
+        delete_old_files = optional_bool(section_name, raw_upload, "delete_old_files", True)
+        delete_excess_files = optional_bool(section_name, raw_upload, "delete_excess_files", True)
+        max_total_size = optional_string(section_name, raw_upload, "max_total_size", None)
+        delete_to_trash = optional_bool(section_name, raw_upload, "delete_to_trash", False)
+        empty_trash = optional_bool(section_name, raw_upload, "empty_trash", True)
+        copy_options = optional_string_list(section_name, raw_upload, "copy_options")
+
+        if max_total_size is not None:
+            parse_size_to_bytes(max_total_size)
+
+        uploads.append(
+            UploadDirectory(
+                local_path=local_path,
+                remote_path=remote_path,
+                copy_options=copy_options,
+                upload_command=upload_command,
+                delete_old_files=delete_old_files,
+                delete_excess_files=delete_excess_files,
+                max_total_size=max_total_size,
+                delete_to_trash=delete_to_trash,
+                empty_trash=empty_trash,
+            )
+        )
+
+    return uploads
+
+
+def load_config(config_path_text: str):
+    """
+    Load external config and copy its values into the existing global settings.
+
+    Existing functions intentionally keep using the same global names as before.
+    That preserves the original execution logic while moving the editable values
+    into the config file.
+    """
+    global CONFIG_PATH
+    global DIRECTORY_CLEANUP_RULES
+    global UPLOAD_DIRECTORIES
+    global DELETE_MIN_AGE
+    global UPLOAD_THREADS
+    global CLEANUP_THREADS
+    global REMOTE_QUOTA_CLEANUP_THREADS
+    global TRASH_CLEANUP_THREADS
+    global LOCK_FILE
+    global DELETE_LIST_DIR
+    global SLEEP_AFTER_STEP
+
+    config_path = Path(config_path_text).expanduser()
+    config = load_json_config(config_path)
+
+    DIRECTORY_CLEANUP_RULES = parse_directory_cleanup_rules(config)
+    UPLOAD_DIRECTORIES = parse_upload_directories(config)
+
+    DELETE_MIN_AGE = optional_string("root", config, "delete_min_age", DELETE_MIN_AGE)
+
+    thread_limits = config.get("thread_limits", {})
+    if not isinstance(thread_limits, dict):
+        raise ValueError("thread_limits must be an object")
+
+    UPLOAD_THREADS = optional_non_negative_int("thread_limits", thread_limits, "upload_threads", UPLOAD_THREADS)
+    CLEANUP_THREADS = optional_non_negative_int("thread_limits", thread_limits, "cleanup_threads", CLEANUP_THREADS)
+    REMOTE_QUOTA_CLEANUP_THREADS = optional_non_negative_int(
+        "thread_limits",
+        thread_limits,
+        "remote_quota_cleanup_threads",
+        REMOTE_QUOTA_CLEANUP_THREADS,
+    )
+    TRASH_CLEANUP_THREADS = optional_non_negative_int(
+        "thread_limits",
+        thread_limits,
+        "trash_cleanup_threads",
+        TRASH_CLEANUP_THREADS,
+    )
+
+    if UPLOAD_THREADS < 1:
+        raise ValueError("thread_limits.upload_threads must be at least 1")
+
+    if CLEANUP_THREADS < 1:
+        raise ValueError("thread_limits.cleanup_threads must be at least 1")
+
+    if REMOTE_QUOTA_CLEANUP_THREADS < 1:
+        raise ValueError("thread_limits.remote_quota_cleanup_threads must be at least 1")
+
+    if TRASH_CLEANUP_THREADS < 1:
+        raise ValueError("thread_limits.trash_cleanup_threads must be at least 1")
+
+    LOCK_FILE = Path(optional_string("root", config, "lock_file", str(LOCK_FILE))).expanduser()
+    DELETE_LIST_DIR = Path(optional_string("root", config, "delete_list_dir", str(DELETE_LIST_DIR))).expanduser()
+    SLEEP_AFTER_STEP = optional_non_negative_int("root", config, "sleep_after_step", SLEEP_AFTER_STEP)
+    CONFIG_PATH = config_path
+
+
 # =============================================================================
 # Lock handling
 # =============================================================================
@@ -614,6 +775,11 @@ def print_startup_summary(cleanup_directories: list[CleanupTarget]):
         print(OUTPUT_SEPARATOR)
         print("SCRIPT STARTUP SUMMARY")
         print(OUTPUT_SEPARATOR)
+
+        print()
+        print("Runtime:")
+        print(f"  Version     : {VERSION}")
+        print(f"  Config file : {CONFIG_PATH}")
 
         print()
         print("Thread limits:")
@@ -1401,17 +1567,30 @@ def upload_one_directory(job_number: int, upload: UploadDirectory) -> bool:
 # Main
 # =============================================================================
 
-def main():
-    atexit.register(release_lock)
+def main() -> int:
+    args = parse_cli_args()
 
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
-
-    acquire_lock()
+    try:
+        load_config(args.config)
+    except Exception as error:
+        print_error(f"Failed loading config: {error}")
+        return 1
 
     cleanup_directories = build_cleanup_directories()
 
+    if not args.validate_config:
+        atexit.register(release_lock)
+
+        signal.signal(signal.SIGINT, signal_handler)
+        signal.signal(signal.SIGTERM, signal_handler)
+
+        acquire_lock()
+
     print_startup_summary(cleanup_directories)
+
+    if args.validate_config:
+        print_step("Config validation successful; no lock file, cleanup, trash cleanup, or upload was started")
+        return 0
 
     print_step("Lockfile doesn't exist, script is starting")
 
@@ -1580,8 +1759,8 @@ def main():
         sys.exit(1)
 
     print_step("Upload and cleanup successful")
-    sys.exit(0)
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
