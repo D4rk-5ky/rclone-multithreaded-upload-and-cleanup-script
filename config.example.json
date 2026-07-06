@@ -1,0 +1,110 @@
+{
+  "delete_min_age": "31d",
+  "lock_file": "/var/lock/rclone-cleanup/rclone-cleanup.lock",
+  "delete_list_dir": "/var/tmp/rclone-cleanup-delete-lists",
+  "sleep_after_step": 5,
+  "thread_limits": {
+    "upload_threads": 2,
+    "cleanup_threads": 2,
+    "remote_quota_cleanup_threads": 2,
+    "trash_cleanup_threads": 2
+  },
+  "upload_directories": [
+    {
+      "name": "Primary archive",
+      "local_path": "/srv/camera/archive/",
+      "remote_path": "Example-GDrive-Encrypted:CameraArchive",
+      "upload_command": "copy",
+      "delete_old_files": true,
+      "delete_excess_files": true,
+      "max_total_size": "500G",
+      "delete_to_trash": false,
+      "empty_trash": true,
+      "buffer_size": "64M",
+      "cleanup_rules": [
+        {
+          "path": "/",
+          "max_files": null,
+          "max_size": "500G",
+          "delete_old_files": null,
+          "delete_excess_files": null,
+          "delete_to_trash": null
+        },
+        {
+          "path": "FrontDoor",
+          "max_files": 25000,
+          "max_size": "150G",
+          "delete_old_files": false,
+          "delete_excess_files": true,
+          "delete_to_trash": false
+        }
+      ],
+      "copy_options": [
+        "--max-age",
+        "12h",
+        "--stats",
+        "10s",
+        "--stats-one-line",
+        "--transfers",
+        "4",
+        "--exclude",
+        "/Temporary/**"
+      ]
+    },
+    {
+      "name": "Mirror archive",
+      "local_path": "/srv/camera/archive/",
+      "remote_path": "Example-OneDrive-Encrypted:CameraMirror",
+      "upload_command": "sync",
+      "delete_old_files": false,
+      "delete_excess_files": true,
+      "max_total_size": "250G",
+      "delete_to_trash": true,
+      "empty_trash": true,
+      "buffer_size": null,
+      "cleanup_rules": [
+        {
+          "path": "/",
+          "max_files": 100000,
+          "max_size": "250G",
+          "delete_old_files": null,
+          "delete_excess_files": null,
+          "delete_to_trash": null
+        }
+      ],
+      "copy_options": [
+        "--max-age=24h",
+        "--stats=30s",
+        "--transfers=2"
+      ]
+    },
+    {
+      "name": "Move completed exports",
+      "local_path": "/srv/camera/completed-exports/",
+      "remote_path": "Example-Mega-Encrypted:CompletedExports",
+      "upload_command": "move",
+      "delete_old_files": true,
+      "delete_excess_files": false,
+      "max_total_size": null,
+      "delete_to_trash": false,
+      "empty_trash": false,
+      "buffer_size": "16M",
+      "cleanup_rules": [
+        {
+          "path": "/",
+          "max_files": null,
+          "max_size": null,
+          "delete_old_files": true,
+          "delete_excess_files": false,
+          "delete_to_trash": false
+        }
+      ],
+      "copy_options": [
+        "--min-age",
+        "5m",
+        "--stats",
+        "15s"
+      ]
+    }
+  ]
+}
