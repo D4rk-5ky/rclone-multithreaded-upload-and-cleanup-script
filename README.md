@@ -1,6 +1,39 @@
+⚠️ Disclaimer & Responsibility
+This software is provided “as is”, without any warranty of any kind.
+
+By using this script, you accept full responsibility for:
+
+How the code is used
+What commands are executed
+Testing the script in your own environment
+Verifying that it behaves exactly as you expect
+Any damage, data loss, downtime, or security issues caused directly or indirectly by its use
+The author is not liable for:
+
+System damage
+Data loss
+Accidental shutdowns or reboots
+Security breaches
+Misconfiguration or misuse
+You must review, test, and validate the script and all configured commands before using it in production or on critical systems.
+
+⚠️ AI-assisted / vibe-coded experimental software. Use at your own risk.
+
+Disclaimer
+This project is AI-assisted / vibe-coded software created as a hobby project. It has not been professionally audited and may contain bugs, unsafe behavior, data-loss issues, security problems, or incorrect assumptions.
+
+You are responsible for reviewing the code, testing it in a safe environment, making backups, and understanding what it does before using it on real data. The author is not responsible for damage, data loss, broken systems, security issues, or other problems caused by using this software.
+
+Data Loss Warning
+This application can perform destructive operations on configured rclone remotes. Cleanup, age-based deletion, file-count limits, directory-size limits, and total remote-size enforcement can permanently delete remote files to make space for uploads.
+
+If a managed remote contains backup data, incorrect remote paths, cleanup paths, filters, age settings, or size limits can delete valid backup copies and may leave you without a usable online backup. Do not treat a remote managed by this script as your only backup.
+
+Always test with disposable data or a test remote first, run `--validate-config`, review the effective remote paths and cleanup limits, and keep at least one separate working backup that this application cannot delete.
+
 # rclone-multithreaded-upload
 
-Version 0.0.13
+Version 0.0.17
 
 This application uploads one or more local directories to independent rclone destinations and maintains configured cleanup limits for the remote data managed by each destination.
 
@@ -21,7 +54,9 @@ The script itself uses only the Python standard library.
 
 ## Project files
 
-- `rclone-multithreaded-upload.py` — application entry point and current implementation.
+- `rclone-multithreaded-upload.py` — executable application entry point and current orchestration/logic implementation.
+- `rclone_multithreaded_upload/__init__.py` — internal Python package marker.
+- `rclone_multithreaded_upload/models.py` — shared dataclasses used by configuration, cleanup, reservation, upload, and result handling.
 - `config.json` — current runtime configuration for the project.
 - `config.example.json` — neutral example showing every supported configuration option.
 - `README.md` — current usage and configuration reference.

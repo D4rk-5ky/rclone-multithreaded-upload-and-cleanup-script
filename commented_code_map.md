@@ -1,10 +1,43 @@
 # Commented Code Map
 
-Version 0.0.13
+Version 0.0.17
 
-This file maps the current implementation in `rclone-multithreaded-upload.py`. It explains what each dataclass, top-level function, application phase, and external rclone command does and why the code uses it.
+This file maps the current v0.0.17 implementation across the executable and internal package modules. It explains what each dataclass, top-level function, application phase, and external rclone command does and why the code uses it.
 
-The application is still a single Python module in v0.0.13. The section headers in the source already divide the responsibilities that can later be extracted into separate modules with limited behavior change.
+## Current release note
+
+v0.0.17 is a README safety-warning correction release. No dataclass or function moved modules in this version. The modularization state remains unchanged from v0.0.14: `models.py` is complete and `output.py` remains the next recommended extraction.
+
+## Current module layout and modularization progress
+
+```text
+rclone-multithreaded-upload.py
+rclone_multithreaded_upload/
+├── __init__.py
+└── models.py
+```
+
+### Moved in v0.0.14
+
+The seven shared dataclasses were moved without redesign into `rclone_multithreaded_upload/models.py`:
+
+- `DirectoryCleanupRule`
+- `UploadDirectory`
+- `CleanupTarget`
+- `RemoteFile`
+- `RemoteQuotaFile`
+- `StageRunResult`
+- `RemoteRunResult`
+
+`rclone-multithreaded-upload.py` imports those same class names from `models.py`. No cleanup, reservation, upload, trash, command execution, thread-pool, or final-verification function was moved in this version.
+
+**Why this was the first extraction:** the dataclasses only define shared state shapes. They do not execute rclone, delete files, mutate the phase flow, acquire locks, or start threads, making them the lowest-risk module boundary.
+
+### Next recommended extraction
+
+The next safest target is `output.py`. Move `OUTPUT_LOCK`, `OUTPUT_SEPARATOR`, `print_step()`, `print_error()`, and `print_job_block()` as one unit. These helpers only serialize and format console output; they do not choose files, calculate quotas, run rclone, or change phase results.
+
+A dependency review showed that `config.py` is slightly more coupled than it first appears: `parse_size_to_bytes()` is also used by cleanup/reservation/verification, `validate_upload_command()` is also used by upload execution, and `load_config()` currently updates several runtime globals. Config remains an early target, but it should follow the simpler output/result extractions so those shared dependencies can be separated deliberately instead of creating circular imports.
 
 ## High-level call path
 
@@ -46,7 +79,7 @@ main
  +-- print_final_run_result
 ```
 
-## Dataclasses
+## `rclone_multithreaded_upload/models.py` — shared dataclasses
 
 ### `DirectoryCleanupRule`
 
@@ -799,38 +832,22 @@ When `buffer_size` is configured, uploads receive:
 
 **Why:** buffer memory can be tuned independently for each remote and is intentionally owned by the script rather than raw `copy_options`.
 
-## Natural module boundaries for a future refactor
+## Modularization roadmap
 
-The current source headers already reveal low-risk extraction boundaries:
+Current status:
 
 ```text
-rclone_multithreaded_upload/
-├── __init__.py
-├── cli.py
-├── config.py
-├── models.py
-├── output.py
-├── results.py
-├── lock.py
-├── rclone_backend.py
-├── remote_files.py
-├── cleanup.py
-├── reservation.py
-├── upload.py
-├── phases.py
-└── main.py
+DONE  models.py              shared dataclasses
+NEXT  output.py              output lock, separator, and basic print helpers
+THEN  results.py             per-remote stage/result state and final summary
+THEN  config.py              config loading/validation after shared-helper separation
+LATER rclone_backend.py      shared rclone command/backend helpers
+LATER remote_files.py        lsjson parsing, normalized remote file records, sorting
+LATER cleanup.py             per-rule/quota/trash/final cleanup verification logic
+LATER reservation.py         source sizing and pre-upload space reservation
+LATER upload.py              upload command construction and streamed execution
+LATER phases.py              thread-pool and phase orchestration
+LATER main.py/cli.py         thin application entry point
 ```
 
-A safer incremental extraction order is:
-
-1. `models.py` — dataclasses only.
-2. `config.py` — config parsing/validation and config dataclasses.
-3. `output.py` plus `results.py` — no destructive behavior.
-4. `rclone_backend.py` plus `remote_files.py` — command/listing helpers.
-5. `cleanup.py` — per-rule, quota, trash, and verification logic.
-6. `reservation.py` — local sizing and space reservation.
-7. `upload.py` — upload argv construction and streamed execution.
-8. `phases.py` — thread-pool orchestration.
-9. `main.py`/`cli.py` — thin application entry point.
-
-The major rule for that refactor should be **move existing functions before redesigning them**. Each module version should first preserve function signatures and behavior, then run compile, CLI, config-validation, import, and command-construction parity checks before any algorithm cleanup is attempted.
+The refactor rule is **move existing code before redesigning it**. Each extraction version preserves existing signatures/behavior where practical and runs compile, import, CLI, config-validation, structural inventory, and package-manifest checks before destructive algorithm changes are considered.
