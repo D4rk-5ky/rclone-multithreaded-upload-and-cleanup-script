@@ -1,393 +1,280 @@
 # Commented Code Map
 
-Version 0.0.18
+Version 0.0.19
 
-v0.0.18 completes the module extraction started in v0.0.14. The seven dataclasses remain in `models.py`; executable logic is now divided by responsibility. The compatibility executable contains no application function definitions and calls `rclone_multithreaded_upload.main.main()`.
-
-## Module layout
-
-```text
-rclone-multithreaded-upload.py
-rclone_multithreaded_upload/
-├── __init__.py
-├── cleanup.py
-├── cli.py
-├── commands.py
-├── config.py
-├── lock.py
-├── main.py
-├── models.py
-├── output.py
-├── phases.py
-├── rclone_backend.py
-├── remote_files.py
-├── reservation.py
-├── results.py
-├── state.py
-├── summary.py
-├── targets.py
-├── upload.py
-├── utils.py
-└── verification.py
-```
-
-## Structural preservation check
-
-The v0.0.17 baseline had 72 top-level application functions in the executable. v0.0.18 keeps 72 top-level application functions across the package modules and leaves 0 application function definitions in `rclone-multithreaded-upload.py`.
-
-The module split therefore moves the executable functions rather than replacing the application with a redesigned workflow.
+v0.0.19 keeps the modular package layout and changes the remote workflow from repeated live re-listing to three per-remote snapshots.
 
 ## High-level call path
 
 ```text
-entry point
-  -> main.main
+rclone-multithreaded-upload.py
+  -> rclone_multithreaded_upload.main.main
      -> cli.parse_cli_args
      -> config.load_config
      -> targets.build_cleanup_directories
      -> results.initialize_run_results
-     -> lock.acquire_lock                    [normal run only]
+     -> lock.acquire_lock
      -> summary.print_startup_summary
-     -> phases.run_cleanup_phase             [PRE-UPLOAD]
-     -> phases.run_trash_cleanup_phase       [PRE-UPLOAD]
-     -> lock.sleep_after_step
      -> phases.run_reservation_and_upload_phase
-        -> one reserve_and_upload_one_remote worker per upload remote
-           -> reservation.reserve_one_upload_remote_space
-              -> reservation.get_filtered_local_upload_size
-              -> remote_files.get_upload_remote_quota_entries
-                 -> remote_files.get_remote_file_entries
-              -> reservation.make_upload_reservation_delete_list
-              -> rclone delete when deficit > 0
-              -> repeat/re-read up to 10 passes
+        -> one reserve_and_upload_one_remote worker per remote
+           -> remote_files.fetch_remote_snapshot              [PRE snapshot]
+           -> reservation.get_filtered_local_upload_size      [single-flight cache]
+           -> planning.build_pre_upload_plan
+              -> planning.plan_cleanup_targets
+                 -> age from snapshot ModTime
+                 -> max_files / max_size
+              -> planning.plan_upload_reservation
+           -> delete_plan.execute_delete_plan
            -> cleanup.cleanup_one_trash_remote
-           -> configured per-remote sleep
            -> upload.upload_one_directory
-     -> phases.run_cleanup_phase             [POST-UPLOAD]
-     -> phases.run_remote_quota_phase        [POST-UPLOAD]
-     -> phases.run_trash_cleanup_phase       [POST-UPLOAD]
+     -> phases.run_post_upload_cleanup_phase
+        -> one post_cleanup_one_remote worker per remote
+           -> remote_files.fetch_remote_snapshot              [POST snapshot]
+           -> planning.build_post_upload_plan
+              -> planning.plan_cleanup_targets
+              -> planning.plan_remote_quota_cleanup
+           -> delete_plan.execute_delete_plan
+           -> cleanup.cleanup_one_trash_remote
      -> phases.run_final_verification
+        -> one verify_one_remote worker per remote
+           -> remote_files.fetch_remote_snapshot              [FINAL snapshot]
+           -> verification.verify_upload_snapshot
      -> results.print_final_run_result
 ```
 
-## `state.py`
-
-### `RuntimeState`
-
-Holds runtime values that the old single-file application stored in module globals:
-
-- parsed upload destinations;
-- config path;
-- delete minimum age;
-- four thread limits;
-- lock path;
-- delete-list directory;
-- configured sleep;
-- 1 MiB reservation safety headroom;
-- 10-pass reservation limit;
-- lock-created ownership flag;
-- per-remote reserved upload bytes and lock;
-- per-remote final result state and lock.
-
-### `STATE`
-
-One shared `RuntimeState` instance. Modules always access `STATE.field` at call time. This prevents copied scalar/path imports from becoming stale after `load_config()` changes runtime values.
-
 ## `models.py`
 
-The seven v0.0.14 dataclasses are unchanged in purpose:
+Shared dataclasses:
 
 - `DirectoryCleanupRule`
 - `UploadDirectory`
 - `CleanupTarget`
 - `RemoteFile`
-- `RemoteQuotaFile`
+- `RemoteQuotaFile` — compatibility model for managed-list callers
+- `RemoteSnapshot`
+- `PlannedDeletion`
+- `RemoteDeletePlan`
 - `StageRunResult`
 - `RemoteRunResult`
 
-No rclone command execution lives in this module.
+`RemoteSnapshot.files_by_path` is keyed by normalized path relative to `UploadDirectory.remote_path`.
 
-## `output.py`
-
-### `print_step(message)`
-Prints one application phase line.
-
-### `print_error(message)`
-Prints one visually indented error line.
-
-### `print_job_block(job_type, job_number, target, message)`
-Uses the shared output lock so concurrent job blocks do not interleave.
-
-## `results.py`
-
-### `initialize_run_results()`
-Creates one fresh `RemoteRunResult` per configured destination.
-
-### `get_stage_result(remote_path, stage_name)`
-Returns one stage object.
-
-### `record_stage_success(...)`
-Marks a non-failed stage successful.
-
-### `record_stage_failure(...)`
-Marks a stage failed and stores unique error text.
-
-### `record_stage_skipped(...)`
-Marks only a pending stage skipped.
-
-### `finalize_stage_for_all(stage_name)`
-Converts remaining pending aggregate stages to success after their phase finishes.
-
-### `mark_pending_stages_skipped()`
-Used when global pre-upload safety phases abort the run.
-
-### `command_error_summary(output, fallback)`
-Keeps error-bearing output lines, or final command lines when no error-pattern line exists.
-
-### `remote_result_label(result)`
-Returns `FAILED`, `SUCCESS`, or `SKIPPED` from the four stage states.
-
-### `print_final_run_result(exit_code)`
-Prints per-remote stages, retained errors, failed remotes, and exit code.
-
-## `config.py`
-
-### `load_json_config(config_path)`
-Loads the external JSON object.
-
-### Validation helpers
-
-- `require_string`
-- `optional_string`
-- `optional_bool`
-- `optional_bool_or_none`
-- `optional_non_negative_int`
-- `optional_positive_int_or_none`
-- `optional_string_list`
-
-### `parse_cleanup_rules(section_name, raw_upload)`
-Builds upload-owned cleanup rules and rejects duplicate normalized paths.
-
-### `parse_upload_directories(config)`
-Builds `UploadDirectory` objects, validates `copy`/`sync`/`move`, size fields, buffer size, and script-managed rclone flags.
-
-### `load_config(config_path_text)`
-Parses the full config and updates `STATE` only after validation succeeds.
-
-## `utils.py`
-
-Pure helpers:
-
-- `parse_size_to_bytes`
-- `validate_upload_command`
-- `remote_name_from_path`
-- `join_rclone_remote_path`
-- `join_relative_path`
-- `normalize_relative_path`
-- `parse_rclone_modtime`
-- `remote_file_oldest_sort_key`
-- `format_bytes`
-
-UTC modification-time parsing remains mandatory before chronological deletion sorting.
-
-## `commands.py`
-
-### `run_command(command, capture_output=False)`
-Runs a subprocess without `shell=True` and optionally captures stdout/stderr.
-
-### `is_directory_not_found(result)`
-Detects the existing rclone `directory not found` condition.
-
-## `rclone_backend.py`
-
-### `get_rclone_config_dump()`
-Runs `rclone config dump`, caches the parsed object, and never prints the captured config.
-
-### `resolve_underlying_backend_type(remote_path)`
-Unwraps `alias`, `chunker`, `compress`, `crypt`, and `hasher` remotes, including on-the-fly backend strings. Loop protection and a 16-layer maximum remain.
-
-### `get_delete_mode_options(target)`
-Maps direct-delete requests to:
-
-```text
-drive    -> --drive-use-trash=false
-mega     -> --mega-hard-delete
-onedrive -> --onedrive-hard-delete
-```
-
-### `get_delete_mode_text(target)`
-Returns the human-readable startup-summary delete mode.
-
-## `targets.py`
-
-### `build_cleanup_directories()`
-Converts every upload-owned cleanup rule into a full `CleanupTarget`. `None` boolean overrides inherit the owning upload value. The owner remote path is retained for stage accounting.
+`RemoteDeletePlan.entries` is keyed by the same relative path, so one file cannot be selected twice in one phase.
 
 ## `remote_files.py`
 
 ### `get_remote_file_entries(remote_path)`
+
 Runs:
 
 ```text
-rclone lsjson --recursive --files-only --no-mimetype <remote>
+rclone lsjson --recursive --files-only --no-mimetype REMOTE
 ```
 
-Validates that the result is an array of files with non-empty `Path`, non-negative integer `Size`, and timezone-aware parseable `ModTime`.
+Validates the JSON array and `Path`, `Size`, and `ModTime` fields.
 
-### `get_upload_remote_quota_entries(upload)`
-Reads one recursive listing from `upload.remote_path`, filters it to paths managed by `cleanup_rules`, and deduplicates overlapping rule coverage by relative path.
+### `fetch_remote_snapshot(remote_path)`
 
-### `make_delete_list(target)`
-Sorts target files oldest-first and selects complete files until both `max_files` and `max_size` are satisfied.
+Converts one recursive listing into `RemoteSnapshot`.
 
-### `make_upload_remote_quota_delete_list(upload)`
-Sorts managed upload files oldest-first and selects complete files until `max_total_size` is satisfied.
+This is called exactly three times per successful remote by the normal application path.
 
-## `cleanup.py`
+### `clone_remote_snapshot(snapshot)`
 
-### `cleanup_one_directory(job_number, target, phase_name)`
-Runs optional age cleanup and optional max-files/max-size cleanup. Failures are recorded against reservation or post-cleanup based on phase name.
+Creates the mutable planning copy.
 
-Age cleanup command:
+### `relative_cleanup_target_path(upload, target)`
+
+Maps a generated full cleanup target back to its relative path below the upload root.
+
+### `files_below_relative_path(snapshot, relative_path)`
+
+Filters the current in-memory working snapshot for one cleanup rule.
+
+### `get_managed_snapshot_files(upload, snapshot)`
+
+Returns the deduplicated union of files covered by `upload.cleanup_rules`.
+
+No remote command is executed by the filtering helpers.
+
+## `planning.py`
+
+All planning is in-memory.
+
+### `cleanup_targets_for_upload(...)`
+
+Returns effective cleanup targets owned by one upload remote.
+
+### `plan_cleanup_targets(...)`
+
+For each effective target, in config order:
+
+1. selects files older than `STATE.delete_min_age` from snapshot `ModTime`;
+2. removes selected age files from the working snapshot;
+3. calculates `max_files` and `max_size` from remaining files;
+4. selects oldest complete files until both limits pass;
+5. removes every selected path from the working snapshot immediately.
+
+### `plan_remote_quota_cleanup(...)`
+
+Calculates managed `max_total_size` from the already-mutated working snapshot and selects oldest complete managed files until the limit passes.
+
+### `plan_upload_reservation(...)`
+
+Calculates:
 
 ```text
-rclone delete <target> --min-age <age> [backend delete option]
+current managed bytes
++ local transfer cap
++ 1 MiB headroom
+- max_total_size
 ```
 
-Excess cleanup command:
+If positive, selects oldest complete managed files until selected bytes are at least the exact deficit.
 
-```text
-rclone delete --files-from <list> <target> [backend delete option]
-```
+No remote re-read occurs after selection.
 
-### `cleanup_one_upload_remote_quota(job_number, upload, phase_name)`
-Enforces upload-level `max_total_size` with one oldest-file delete list.
+### `build_pre_upload_plan(...)`
 
-### `cleanup_one_trash_remote(job_number, upload, phase_name)`
-Runs `rclone cleanup` only when `empty_trash=true` and script-managed deletions use trash. Unsupported provider cleanup is treated as a skip, matching prior behavior.
+Uses one pre-upload snapshot for age cleanup, rule limits, and upload reservation.
+
+### `build_post_upload_plan(...)`
+
+Uses one post-upload snapshot for age cleanup, rule limits, and `max_total_size` cleanup.
+
+## `delete_plan.py`
+
+### `add_planned_deletion(...)`
+
+Adds a path once and immediately removes it from the working snapshot.
+
+The first rule to select a file determines its delete mode, matching sequential planning semantics.
+
+### `planned_delete_bytes(plan)`
+
+Totals selected bytes.
+
+### `print_delete_plan_summary(...)`
+
+Prints files, bytes, and selection reason counts.
+
+### `execute_delete_plan(...)`
+
+Groups plan entries by `delete_to_trash` only when required.
+
+For each mode it writes one `--files-from` list and runs one `rclone delete` against the upload root.
+
+Current supplied GDrive, MEGA, and OneDrive configuration produces one delete mode per remote and therefore at most one combined delete command per snapshot cleanup phase when deletion is needed.
 
 ## `reservation.py`
 
-### `transfer_cap_bytes(transfer_bytes)`
-Returns zero for non-positive input; otherwise adds one byte.
-
-### `validate_local_upload_path(upload)`
-Requires an existing local directory.
-
 ### `get_size_filter_options(upload)`
-Copies only source-selection filters from upload options to `rclone size`.
 
-### `get_filtered_local_upload_size(job_number, upload)`
-Runs:
+Extracts only source-selection filters from upload options.
 
-```text
-rclone size <local_path> --json [source filters]
-```
+### `local_size_cache_key(upload)`
 
-Parses `bytes` and `count` with `int()` as in v0.0.17 and rejects negative values.
-
-### `make_upload_reservation_delete_list(upload, local_upload_bytes)`
-Calculates the exact reservation deficit, sorts managed files oldest-first, and selects complete files until selected bytes meet or exceed the deficit.
-
-### `reserve_one_upload_remote_space(job_number, upload)`
-Preserves the live-source reservation loop:
-
-1. skip reservation when excess deletion or total quota is disabled;
-2. re-size the filtered local source every pass;
-3. reject a local source that cannot fit on an empty managed remote with safety headroom;
-4. list managed remote files and calculate the exact deficit;
-5. delete one oldest-file list when required;
-6. loop and re-read live local/remote sizes;
-7. stop after 10 passes rather than loop forever;
-8. store measured local bytes only after successful reservation.
-
-## `upload.py`
-
-### `print_thread_output(thread_number, remote_path, line)`
-Serializes one upload output line under the output lock.
-
-### `run_command_streamed(command, thread_number, remote_path)`
-Starts the upload subprocess with stderr merged into stdout, streams each line live, retains all output, and returns `(return_code, captured_output)`.
-
-### `get_upload_buffer_options(upload)`
-Returns the optional `--buffer-size` pair.
-
-### `upload_one_directory(job_number, upload)`
-Builds and executes the configured `copy`, `sync`, or `move` command. `sync` receives direct-delete backend flags where configured. A positive successful reservation receives:
+Key:
 
 ```text
---max-transfer <reserved bytes + 1>B --cutoff-mode CAUTIOUS
+resolved local path + ordered source-selection filters
 ```
 
-Upload failures retain command context for the final result.
+### `_calculate_filtered_local_upload_size(upload)`
 
-## `verification.py`
+Runs the actual `rclone size --json` command.
 
-### `verify_one_cleanup_target(job_number, target)`
-Re-lists one cleanup target and verifies final recursive `max_files` and `max_size` values.
+### `get_filtered_local_upload_size(...)`
 
-### `verify_one_upload_remote_quota(job_number, upload)`
-Re-lists managed upload files and verifies final `max_total_size`.
+Uses a `Future`-based single-flight cache.
+
+The first pipeline for a key performs the scan. Concurrent pipelines with the same key wait for and reuse that exact result.
+
+### `transfer_cap_bytes(...)`
+
+Preserves the one-byte allowance.
+
+## `cleanup.py`
+
+Exports the combined delete-plan executor and keeps optional `rclone cleanup` / empty-trash handling.
 
 ## `phases.py`
 
-### `run_cleanup_phase(cleanup_directories, phase_name)`
-Runs cleanup targets concurrently with `STATE.cleanup_threads`.
+### `reserve_and_upload_one_remote(...)`
 
-### `run_remote_quota_phase(phase_name)`
-Runs upload-level total-quota cleanup concurrently with `STATE.remote_quota_cleanup_threads`.
-
-### `run_trash_cleanup_phase(phase_name)`
-Runs per-remote trash cleanup concurrently with `STATE.trash_cleanup_threads`.
-
-### `reserve_and_upload_one_remote(job_number, upload)`
-Preserves one remote's strict internal order:
+Per remote:
 
 ```text
-reservation
-  -> post-reservation trash cleanup
-  -> per-remote sleep
-  -> upload
+PRE snapshot -> plan clean/reservation -> combined delete -> trash -> sleep -> upload
 ```
 
-A reservation or post-reservation trash failure skips only that remote's upload.
+### `run_reservation_and_upload_phase(...)`
 
-### `run_reservation_and_upload_phase()`
-Starts independent remote pipelines concurrently with `STATE.upload_threads`.
+Starts independent remote pipelines using `upload_threads`.
 
-There is no global reservation barrier. One remote may already delete or upload while another remote is still running `rclone size` or `rclone lsjson`.
+There is no global snapshot/reservation barrier.
 
-### `run_final_verification(cleanup_directories)`
-Verifies cleanup targets and upload-level total quotas with their respective thread pools, records crashes as final-quota failures, then finalizes pending final-quota stages.
+### `post_cleanup_one_remote(...)`
 
-## `summary.py`
+Per remote:
 
-### `print_startup_summary(cleanup_directories)`
-Prints the effective execution order, thread limits, reservation constants, upload destinations, cleanup-rule inheritance values, and generated cleanup targets.
+```text
+POST snapshot -> plan all cleanup/quota rules -> combined delete -> trash
+```
 
-## `lock.py`
+### `run_post_upload_cleanup_phase(...)`
 
-### `acquire_lock()`
-Creates the lock atomically and records ownership.
+Runs post-cleanup workers concurrently.
 
-### `release_lock()`
-Removes the lock only when this process created it.
+### `verify_one_remote(...)`
 
-### `signal_handler(signum, frame)`
-Prints the signal, releases the lock, and exits `128 + signum`.
+Fetches the final snapshot and passes every rule for that remote to the single snapshot verifier.
 
-### `sleep_after_step()`
-Prints and sleeps for the configured global delay.
+### `run_final_verification(...)`
 
-## `main.py`
+Runs final per-remote verification concurrently.
 
-### `main()`
-Owns top-level phase ordering and exit-code aggregation only. It deliberately still runs global post-upload cleanup and final verification after reservation/upload pipeline failures because an upload can fail after partial transfer.
+## `verification.py`
 
-## Compatibility entry point
+### `verify_upload_snapshot(...)`
 
-`rclone-multithreaded-upload.py` contains no application function definitions. It imports `main` from the package and exits with the returned code.
+From one final snapshot, verifies:
 
-## Regression verification
+- every effective `max_files` limit;
+- every effective `max_size` limit;
+- the upload's managed `max_total_size` limit.
 
-`tests/test_logic.py` is non-destructive and mocks remote execution where required. The release tests cover the reservation calculations and the no-global-barrier concurrency property in addition to compile/import/CLI/config validation.
+The function performs no remote listing itself.
+
+## `upload.py`
+
+Upload construction remains intentionally conservative.
+
+When a reservation size exists, the upload adds:
+
+```text
+--max-transfer <reserved local bytes + 1 byte>B
+--cutoff-mode CAUTIOUS
+```
+
+The configured `copy`, `sync`, or `move`, source filters, buffer size, and backend-specific sync delete options remain in the upload command.
+
+## Normal recursive remote listing count
+
+Successful normal path for each remote:
+
+```text
+get_remote_file_entries PRE   = 1 lsjson
+get_remote_file_entries POST  = 1 lsjson
+get_remote_file_entries FINAL = 1 lsjson
+-----------------------------------------
+TOTAL                         = 3 lsjson
+```
+
+No age cleanup command performs a separate remote traversal.
+
+No reservation retry loop performs additional remote listings.
+
+No cleanup target is individually re-listed during final verification.
+
+This count is about rclone recursive listing commands. Provider pagination may require multiple API transactions inside one command.

@@ -33,167 +33,98 @@ Always test with disposable data or a test remote first, run `--validate-config`
 
 # rclone-multithreaded-upload
 
-Version 0.0.18
+Version 0.0.19
 
-This application uploads one or more local directories to independent rclone destinations and maintains configured cleanup limits for the remote data managed by each destination.
+Uploads one or more local directories to independent rclone destinations and maintains configured age, file-count, folder-size, and managed remote-size limits.
 
-The script is designed for unattended CCTV/archive-style workloads where old remote files may need to be deleted to make room before an upload starts.
+v0.0.19 replaces repeated remote re-listing with a three-snapshot planner.
 
-> **Warning:** this application can delete remote files. Validate the configuration first and test against disposable data or a test remote before production use.
+## Main v0.0.19 optimization
 
-## Requirements
-
-- Python 3 with support for `X | None` type syntax.
-- `rclone` installed and available in `PATH`.
-- All referenced rclone remotes already configured.
-- Read access to each configured `local_path`.
-- Permission to create the configured lock-file parent directory and delete-list directory.
-- Remote permissions required by the selected rclone upload and cleanup operations.
-
-The application uses only the Python standard library.
-
-## v0.0.18 modular layout
-
-The old executable is now only a compatibility entry point. Runtime logic lives in the package modules:
+A normal successful remote pipeline now performs exactly three recursive remote `rclone lsjson` commands:
 
 ```text
-rclone-multithreaded-upload.py
-rclone_multithreaded_upload/
-├── __init__.py
-├── cleanup.py
-├── cli.py
-├── commands.py
-├── config.py
-├── lock.py
-├── main.py
-├── models.py
-├── output.py
-├── phases.py
-├── rclone_backend.py
-├── remote_files.py
-├── reservation.py
-├── results.py
-├── state.py
-├── summary.py
-├── targets.py
-├── upload.py
-├── utils.py
-└── verification.py
+1. PRE-UPLOAD snapshot
+   -> age cleanup planning
+   -> max_files / max_size planning
+   -> upload reservation planning
+   -> combined delete plan
+   -> upload
+
+2. POST-UPLOAD snapshot
+   -> age cleanup planning
+   -> max_files / max_size planning
+   -> max_total_size planning
+   -> combined delete plan
+
+3. FINAL snapshot
+   -> verify every max_files / max_size / max_total_size limit
 ```
 
-Additional project files:
+The three-snapshot target refers to recursive remote listing commands. Actual `rclone delete`, `copy` / `sync` / `move`, optional `rclone cleanup`, and backend detection still run when required. A recursive listing may also require multiple provider API pages internally.
 
-- `config.json` — current runtime configuration, unchanged from v0.0.17.
-- `config.example.json` — neutral full configuration example, unchanged from v0.0.17.
-- `tests/test_logic.py` — eight focused non-destructive regression tests for the moved logic.
-- `tests/test_integration_fake_rclone.py` — one full-flow integration test using a temporary fake `rclone`; it never contacts real cloud remotes.
-- `commented_code_map.md` — module/function/command map.
-- `VERSIONING.md` — release changes.
+## Why it is faster
 
-## Why `state.py` exists
+`rclone lsjson --recursive --files-only --no-mimetype` already provides the file path, size, and modification time needed by the cleanup and reservation rules.
 
-The v0.0.17 single-file implementation updated mutable module globals in `load_config()`.
+v0.0.19 keeps each listing in memory as a `RemoteSnapshot` and calculates deletion decisions in Python.
 
-Simply moving those globals into `config.py` and importing values such as:
+When a file is selected for deletion, it is immediately removed from the working snapshot. The next rule therefore sees the simulated post-delete state without another remote listing.
 
-```python
-from config import UPLOAD_THREADS
-```
-
-would risk stale imported integers and `Path` objects after `load_config()` changed the original module variables.
-
-v0.0.18 uses one shared `RuntimeState` instance:
-
-```python
-from .state import STATE
-```
-
-Modules read values such as:
-
-```python
-STATE.upload_threads
-STATE.delete_list_dir
-STATE.sleep_after_step
-```
-
-at runtime. The configuration loader updates the same state object used by cleanup, reservation, upload, phase, lock, result, and summary modules.
-
-This is a module-boundary change. It is not intended to change the configured behavior.
-
-## Basic commands
-
-Show help:
-
-```bash
-./rclone-multithreaded-upload.py --help
-```
-
-Show version:
-
-```bash
-./rclone-multithreaded-upload.py --version
-```
-
-Validate configuration without creating the lock file or running rclone cleanup, sizing, trash cleanup, or upload commands:
-
-```bash
-./rclone-multithreaded-upload.py --config ./config.json --validate-config
-```
-
-Run the application:
-
-```bash
-./rclone-multithreaded-upload.py --config ./config.json
-```
-
-## Normal execution order
-
-1. Load and validate JSON configuration.
-2. Build full cleanup targets from every destination's own `cleanup_rules`.
-3. Acquire the atomic single-instance lock.
-4. Run pre-upload per-rule cleanup.
-5. Run pre-upload trash cleanup where enabled.
-6. Sleep for `sleep_after_step` seconds.
-7. Start independent reservation/upload pipelines using `upload_threads`.
-8. Each remote pipeline independently:
-   1. sizes the filtered local source with `rclone size --json`;
-   2. performs one recursive `rclone lsjson` for the managed remote root;
-   3. calculates `managed remote bytes + reserved local bytes + 1 MiB safety headroom`;
-   4. selects the oldest complete managed files until selected bytes are at least the exact deficit;
-   5. runs one `rclone delete --files-from` for the reservation pass when required;
-   6. re-reads local and remote sizes and repeats up to 10 cleanup passes;
-   7. performs that remote's post-reservation trash cleanup where configured;
-   8. sleeps for `sleep_after_step` seconds for that remote;
-   9. starts that remote's `copy`, `sync`, or `move` upload immediately.
-9. Run post-upload per-rule cleanup even if an upload failed or partially transferred data.
-10. Enforce post-upload `max_total_size` limits.
-11. Run post-upload trash cleanup where enabled.
-12. Verify final `max_files`, `max_size`, and `max_total_size` limits.
-13. Print `FINAL RUN RESULT` and exit `0` only when all required stages succeed.
-
-## Independent remote pipeline behavior
-
-There is deliberately **no global reservation barrier**.
-
-For example, this is valid:
+Example:
 
 ```text
-GDrive   : reservation -> delete -> upload
-Mega     : reservation -> lsjson still running
-OneDrive : reservation -> lsjson still running
+PRE-UPLOAD SNAPSHOT
+        |
+        +--> age rule selects old files
+        |       working snapshot removes them
+        |
+        +--> max_files / max_size sees remaining files
+        |       working snapshot removes selected files
+        |
+        +--> reservation sees remaining managed files
+        |       selects oldest complete files for exact deficit
+        v
+COMBINED DELETE PLAN
+        |
+        v
+rclone delete --files-from ...
+        |
+        v
+UPLOAD
 ```
 
-A fast remote is allowed to upload after its own reservation and post-reservation trash step finish. It does not wait for unrelated remotes.
+Files are still selected oldest first and only complete files are selected.
 
-The v0.0.18 regression suite verifies this ordering twice: once with a focused concurrent pipeline test and once through the real entry point using the fake-rclone integration environment.
+## Combined delete plans
 
-## Reservation behavior
+Age cleanup, cleanup-rule limits, and upload reservation no longer each execute their own remote listing and delete-list calculation.
 
-Reservation remains deliberately conservative.
+They add files to one `RemoteDeletePlan`.
 
-The application reserves space for the **complete local source selected by source-selection filters in `copy_options`**. It does not perform a source-versus-destination comparison before deciding the reservation size.
+The same file is selected only once because a selected path is removed from the working snapshot immediately.
 
-Source-selection filters copied to `rclone size` include:
+Normally one delete command is executed for the complete phase:
+
+```bash
+rclone delete --files-from DELETE_LIST REMOTE:
+```
+
+If one remote has cleanup rules that intentionally mix trash and hard-delete modes, the combined plan is split by delete mode. This preserves the configured delete behavior and may require two delete commands for that phase.
+
+## Local source size cache
+
+The filtered local source size is also cached with a concurrent single-flight calculation.
+
+The cache key contains:
+
+```text
+normalized local_path
++
+source-selection filter options
+```
+
+Source-selection options include:
 
 ```text
 --min-age
@@ -211,99 +142,214 @@ Source-selection filters copied to `rclone size` include:
 --ignore-case
 ```
 
-Runtime options such as `--stats`, `--transfers`, and `--buffer-size` are not forwarded to `rclone size` because they do not change the selected source byte total.
+With the supplied production configuration, GDrive, MEGA, and OneDrive use the same Frigate source and the same source-selection filters. The normal run therefore performs one `rclone size --json` scan and shares the result between the three remote pipelines.
 
-The reservation byte deficit is:
+Upload/runtime options such as `--stats`, `--transfers`, and `--buffer-size` are not part of the size cache key because they do not change which local files are selected.
+
+## Reservation logic
+
+Reservation remains conservative.
+
+The local candidate size is the complete local source selected by the upload source filters. The script does not first compare local and remote files to estimate only missing uploads.
+
+The reservation deficit is:
 
 ```text
-current managed remote bytes
+managed remote bytes after planned pre-cleanup
 + reserved upload cap
 + 1 MiB safety headroom
 - max_total_size
 ```
 
-When the value is positive, managed remote files are sorted by parsed UTC `ModTime`, oldest first. Complete files are selected until the selected byte total is at least the deficit.
+If the result is positive, the planner selects oldest complete managed remote files until the selected byte total is at least the exact deficit.
 
-There is no identical-file protection in reservation cleanup. A managed remote file is eligible based on the cleanup-rule scope and age ordering.
-
-After successful reservation, the measured local byte count is stored for that remote. A positive reserved upload receives:
+The upload keeps the existing safety cap:
 
 ```text
---max-transfer <reserved bytes + 1>B --cutoff-mode CAUTIOUS
+--max-transfer <measured local bytes + 1 byte>
+--cutoff-mode CAUTIOUS
 ```
 
-This preserves the previous fail-safe behavior when the source grows after reservation.
+The previous repeated reservation loop and repeated remote/local re-reading have been removed. The pre-upload snapshot is the planning state for that remote. Final live verification still occurs after post-upload cleanup.
 
-## Cleanup rules and `max_total_size`
+## Independent remote pipelines
 
-Each `upload_directories` entry owns its own `cleanup_rules`.
+There is no global snapshot or reservation barrier.
 
-A cleanup-rule path is relative to that entry's `remote_path`:
-
-```json
-{
-  "path": "/",
-  "max_size": "12G"
-}
-```
-
-`"/"` means the configured `remote_path` root.
-
-Per-rule values:
-
-- `max_files`: positive integer or `null`.
-- `max_size`: size string or `null`.
-- `delete_old_files`: `true`, `false`, or `null` to inherit the upload default.
-- `delete_excess_files`: `true`, `false`, or `null` to inherit the upload default.
-- `delete_to_trash`: `true`, `false`, or `null` to inherit the upload default.
-
-`max_total_size` is enforced across files managed by the upload entry's cleanup-rule paths. One recursive remote-root listing is read and Python filters the returned entries to managed rule paths. Overlapping rule coverage is deduplicated by relative file path.
-
-## Upload commands
-
-Supported values are intentionally restricted to:
+A fast remote may progress like this:
 
 ```text
-copy
-sync
-move
+GDrive   : pre-snapshot -> plan -> delete -> upload
+MEGA     : pre-snapshot still running
+OneDrive : pre-snapshot still running
 ```
 
-The following cannot be selected as `upload_command`:
+Each remote waits only for its own pre-upload snapshot, planning, planned delete, optional trash cleanup, and configured sleep.
+
+## Execution order
 
 ```text
-delete
-purge
-cleanup
+load and validate config
+        |
+        v
+acquire lock
+        |
+        v
+independent per-remote pipelines
+        |
+        +--> PRE-UPLOAD lsjson snapshot       [snapshot 1]
+        +--> plan age cleanup
+        +--> plan max_files / max_size
+        +--> get cached local source size when reservation is enabled
+        +--> plan max_total_size upload reservation
+        +--> execute combined pre-upload delete plan
+        +--> optional trash cleanup
+        +--> configured sleep
+        +--> upload immediately for that remote
+        |
+        v
+post-upload per-remote cleanup
+        |
+        +--> POST-UPLOAD lsjson snapshot      [snapshot 2]
+        +--> plan age cleanup
+        +--> plan max_files / max_size
+        +--> plan max_total_size
+        +--> execute combined post-upload delete plan
+        +--> optional trash cleanup
+        |
+        v
+final per-remote verification
+        |
+        +--> FINAL lsjson snapshot            [snapshot 3]
+        +--> verify all cleanup rules
+        +--> verify max_total_size
+        |
+        v
+FINAL RUN RESULT
 ```
 
-For `sync`, backend-specific direct-delete flags are added only when `delete_to_trash=false` and the underlying backend is one of the explicitly mapped backends:
+Post-upload cleanup and final verification still run when an upload fails or partially transfers data.
+
+## Module layout
 
 ```text
-drive    -> --drive-use-trash=false
-mega     -> --mega-hard-delete
-onedrive -> --onedrive-hard-delete
+rclone-multithreaded-upload.py
+rclone_multithreaded_upload/
+├── __init__.py
+├── cleanup.py
+├── cli.py
+├── commands.py
+├── config.py
+├── delete_plan.py
+├── lock.py
+├── main.py
+├── models.py
+├── output.py
+├── phases.py
+├── planning.py
+├── rclone_backend.py
+├── remote_files.py
+├── reservation.py
+├── results.py
+├── state.py
+├── summary.py
+├── targets.py
+├── upload.py
+├── utils.py
+└── verification.py
 ```
 
-Wrapper remotes such as `crypt` are resolved through `rclone config dump`. The captured rclone configuration is retained in memory and is not printed because it may contain obscured credentials or tokens.
+Important responsibilities:
 
-## Lock behavior
+- `remote_files.py` — recursive JSON listing and in-memory snapshot filtering.
+- `planning.py` — age, rule-limit, max-total-size, and reservation planning.
+- `delete_plan.py` — combined deletion selection bookkeeping and delete execution.
+- `reservation.py` — filtered local-size parsing and concurrent single-flight cache.
+- `phases.py` — independent three-snapshot workflow orchestration.
+- `verification.py` — all final limits checked from one final snapshot per remote.
 
-The lock file is created atomically with `O_CREAT | O_EXCL`.
+## Requirements
 
-If the configured lock already exists:
+- Python 3 with `X | None` type syntax support.
+- `rclone` available in `PATH`.
+- Configured rclone remotes.
+- Read access to local upload paths.
+- Write permission for the lock-file parent and delete-list directory.
+- Remote permissions required for the configured upload and delete operations.
+
+The Python application uses only the standard library.
+
+## Commands
+
+Show version:
+
+```bash
+./rclone-multithreaded-upload.py --version
+```
+
+Validate the JSON configuration without creating the lock or executing rclone work:
+
+```bash
+./rclone-multithreaded-upload.py --config ./config.json --validate-config
+```
+
+Run:
+
+```bash
+./rclone-multithreaded-upload.py --config ./config.json
+```
+
+## Configuration compatibility
+
+The v0.0.19 configuration schema is unchanged from v0.0.18.
+
+The supplied `config.json` still contains:
 
 ```text
-Lock file exists, exiting.
+upload_threads                4
+cleanup_threads               4
+remote_quota_cleanup_threads  4
+trash_cleanup_threads         4
+
+GDrive    max_total_size 12G
+Mega      max_total_size 12G
+OneDrive  max_total_size 50G
 ```
 
-The process exits with code `0`, matching the previous behavior.
+`cleanup_threads` and `remote_quota_cleanup_threads` are both retained for configuration compatibility. Combined post-upload cleanup and final-verification worker counts use the higher configured value because cleanup-rule and remote-quota work now share the same per-remote snapshot phase.
 
-Only a process that successfully created the lock attempts to remove it.
+## Age cleanup
 
-## Final result state
+Age cleanup is now planned from the `ModTime` values in the remote JSON snapshot rather than running a separate `rclone delete --min-age` traversal.
 
-Each remote retains four stages:
+The configured `delete_min_age` parser follows the rclone duration behavior used by the project, including seconds, `ms`, `s`, `m`, `h`, `d`, `w`, `M`, `y`, `off`, and supported absolute date/time forms.
+
+The fixed extended duration multipliers match rclone's parser:
+
+```text
+1d = 24 hours
+1w = 7 days
+1M = 30 days
+1y = 365 days
+```
+
+## Delete modes
+
+The existing backend-specific direct-delete behavior remains:
+
+```text
+Google Drive -> --drive-use-trash=false
+MEGA         -> --mega-hard-delete
+OneDrive     -> --onedrive-hard-delete
+```
+
+when `delete_to_trash` is false and the underlying rclone backend is detected.
+
+When `delete_to_trash` is true, backend-default/trash behavior is used.
+
+## Final result
+
+The final summary still records these stages per remote:
 
 ```text
 Reservation
@@ -312,17 +358,13 @@ Post cleanup
 Final quota
 ```
 
-Each stage ends as:
+A failed pre-upload snapshot, plan, delete, reservation, or trash step fails `Reservation` and prevents the upload for that remote.
 
-```text
-SUCCESS
-FAILED
-SKIPPED
-```
+A failed upload does not prevent global post-upload cleanup and final verification.
 
-Failed command output is filtered for error-bearing lines. If no error-like line is found, the last non-empty command lines are kept so a non-zero command retains context in `FINAL RUN RESULT`.
+The process exits `0` only when all required stages succeed.
 
-## Non-destructive regression tests
+## Tests
 
 Run:
 
@@ -330,38 +372,27 @@ Run:
 python3 -m unittest discover -s tests -v
 ```
 
-The nine-test suite does not contact real rclone remotes or delete cloud data. It contains eight focused logic/concurrency tests plus one full-flow integration test that runs the real v0.0.18 entry point against a temporary fake `rclone` state store.
+v0.0.19 contains 10 non-destructive tests.
 
-It verifies:
+The fake-rclone integration test executes the real compatibility entry point against a temporary state file. It asserts:
 
-- binary size parsing;
-- source-filter extraction for `rclone size`;
-- one remote-root listing and managed-path deduplication;
-- oldest-complete-file cleanup selection;
-- exact reservation deficit and full-file over-selection;
-- upload buffer/filter/transfer-cap command construction;
-- independent per-remote pipeline concurrency with no global reservation barrier;
-- current production config thread counts, remote names, and `12G` / `12G` / `50G` limits;
-- complete entry-point phase flow through reservation deletion, upload, post-upload cleanup, final verification, and final result reporting using fake remote state.
-
-## Updating from v0.0.17
-
-Keep the complete directory layout together. The executable imports the internal package modules.
-
-Replace the old v0.0.17 executable and package with the v0.0.18 files, while retaining your desired `config.json`.
-
-The supplied v0.0.18 `config.json` and `config.example.json` are intentionally unchanged from the v0.0.17 configuration schema and values.
-
-Before the first real run:
-
-```bash
-./rclone-multithreaded-upload.py --config ./config.json --validate-config
+```text
+3 lsjson commands for fast:root
+3 lsjson commands for slow:root
+1 local rclone size command for the shared source/filter key
+no standalone rclone delete --min-age command
+combined planned deletion
+upload
+post-upload cleanup
+final verification
+successful final result
+fast remote uploads before slow remote finishes its first snapshot
 ```
 
-Then run the non-destructive tests:
+The tests do not contact GDrive, MEGA, or OneDrive.
 
-```bash
-python3 -m unittest discover -s tests -v
-```
+## Live-run warning
 
-A live production run is still required to prove provider-specific rclone behavior against your actual GDrive, MEGA, and OneDrive remotes. The fake-rclone integration test exercises the application end to end, but it does not emulate provider APIs, throttling, trash semantics, crypt behavior, or cloud-specific rclone responses.
+The snapshot planner has been tested with non-destructive unit tests and a fake-rclone integration environment. It has not been destructively tested against the user's real cloud remotes as part of packaging.
+
+A provider can change while a snapshot is being planned or after it is read. v0.0.19 intentionally accepts this reduced-live-recheck model to remove repeated remote traversals. The 1 MiB reservation headroom, upload transfer cap, post-upload snapshot, cleanup, and final live snapshot verification remain safety layers, but they do not make remote deletion risk-free.

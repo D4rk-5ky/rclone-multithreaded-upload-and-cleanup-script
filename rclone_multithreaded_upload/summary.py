@@ -1,4 +1,4 @@
-"""Startup configuration and execution-order summary."""
+"""Startup configuration and snapshot-pipeline summary."""
 
 from .models import CleanupTarget
 from .output import OUTPUT_LOCK, OUTPUT_SEPARATOR
@@ -15,20 +15,20 @@ def print_startup_summary(cleanup_directories: list[CleanupTarget]):
         print(OUTPUT_SEPARATOR)
         print(f"Config file: {STATE.config_path}")
         print()
-        print("Execution order:")
-        print("  1. PRE-UPLOAD cleanup_rules")
-        print("  2. PRE-UPLOAD trash cleanup")
-        print("  3. Start independent per-remote reservation/upload pipelines")
-        print("     a. Read filtered local source size with rclone size")
-        print("     b. Compare local bytes + managed remote bytes with max_total_size")
-        print("     c. Delete oldest remote files until selected bytes >= byte deficit")
-        print("     d. Re-read sizes and verify reservation")
-        print("     e. Trash cleanup after reservation for that remote")
-        print("     f. Upload that remote as soon as it is ready")
-        print("  4. POST-UPLOAD cleanup_rules")
-        print("  5. POST-UPLOAD max_total_size cleanup")
-        print("  6. POST-UPLOAD trash cleanup")
-        print("  7. Final limit verification")
+        print("Execution order per remote:")
+        print("  1. PRE-UPLOAD recursive lsjson snapshot")
+        print("  2. Plan age cleanup + max_files/max_size + upload reservation in Python")
+        print("  3. Execute one combined delete plan per required delete mode")
+        print("  4. Optional trash cleanup")
+        print("  5. Upload immediately when this remote is ready")
+        print("  6. POST-UPLOAD recursive lsjson snapshot")
+        print("  7. Plan age/rule/max_total_size cleanup in Python")
+        print("  8. Execute one combined delete plan per required delete mode")
+        print("  9. Optional trash cleanup")
+        print(" 10. FINAL recursive lsjson snapshot and verify every configured limit")
+        print()
+        print("Normal successful target: exactly 3 recursive remote lsjson snapshots per remote.")
+        print("Delete, upload, backend trash cleanup, and backend API pagination are separate rclone work.")
         print()
         print("Thread limits:")
         print(f"  Upload/pipeline jobs    : {STATE.upload_threads}")
@@ -42,7 +42,6 @@ def print_startup_summary(cleanup_directories: list[CleanupTarget]):
             "  Reservation headroom   : "
             f"{format_bytes(STATE.reservation_safety_headroom_bytes)}"
         )
-        print(f"  Reservation pass limit : {STATE.max_reservation_cleanup_passes}")
         print(f"  Lock file               : {STATE.lock_file}")
         print(f"  Delete-list directory   : {STATE.delete_list_dir}")
         print(f"  Sleep after step        : {STATE.sleep_after_step}s")

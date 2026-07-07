@@ -1,124 +1,146 @@
-rclone-multithreaded-upload v0.0.18 verification report
-========================================================
+rclone-multithreaded-upload v0.0.19 verification report
+Date: 2026-07-07
 
-Scope
+SCOPE
 -----
-This report validates the full module extraction from the v0.0.17-style
-single executable into the v0.0.18 package layout. Validation is intentionally
-non-destructive and does not contact the configured GDrive, MEGA, or OneDrive
-remotes.
+v0.0.19 replaces repeated remote cleanup/reservation listings with a per-remote
+three-snapshot planner while preserving the configured clean -> reserve -> upload
+-> clean -> final verification workflow.
 
-Version / CLI
--------------
-Version command: rclone-multithreaded-upload.py 0.0.18
---help: PASS
---config ./config.json --validate-config: PASS
+NORMAL SUCCESSFUL REMOTE SNAPSHOT TARGET
+----------------------------------------
+1. PRE-UPLOAD recursive rclone lsjson
+   Used in memory for:
+   - age cleanup planning
+   - max_files planning
+   - max_size planning
+   - max_total_size upload reservation planning
 
-Compilation / imports
+2. POST-UPLOAD recursive rclone lsjson
+   Used in memory for:
+   - age cleanup planning
+   - max_files planning
+   - max_size planning
+   - max_total_size cleanup planning
+
+3. FINAL recursive rclone lsjson
+   Used in memory for:
+   - all max_files verification
+   - all max_size verification
+   - max_total_size verification
+
+This is three recursive remote listing commands, not three total rclone commands.
+Actual delete, upload, optional trash cleanup, and backend detection commands remain
+when required. Provider API pagination can also occur inside a recursive listing.
+
+IMPLEMENTATION CHECKS
 ---------------------
-python3 -m compileall -q .: PASS
-MODULE_COUNT=19
-rclone_multithreaded_upload.cleanup
-rclone_multithreaded_upload.cli
-rclone_multithreaded_upload.commands
-rclone_multithreaded_upload.config
-rclone_multithreaded_upload.lock
-rclone_multithreaded_upload.main
-rclone_multithreaded_upload.models
-rclone_multithreaded_upload.output
-rclone_multithreaded_upload.phases
-rclone_multithreaded_upload.rclone_backend
-rclone_multithreaded_upload.remote_files
-rclone_multithreaded_upload.reservation
-rclone_multithreaded_upload.results
-rclone_multithreaded_upload.state
-rclone_multithreaded_upload.summary
-rclone_multithreaded_upload.targets
-rclone_multithreaded_upload.upload
-rclone_multithreaded_upload.utils
-rclone_multithreaded_upload.verification
+- Version: 0.0.19
+- Package Python modules: 22
+- Package top-level functions: 86
+- Compatibility entry-point top-level functions: 0
+- All 22 package modules imported successfully.
+- compileall passed for package, tests, and compatibility entry point.
+- --version passed and reported 0.0.19.
+- --help passed.
+- --validate-config passed against packaged config.json.
+- README required disclaimer prefix exactly matches v0.0.18.
+- README contains the project-specific Data Loss Warning in the required prefix.
 
-Structural extraction
----------------------
-__init__.py: 0
-cleanup.py: 3
-cli.py: 1
-commands.py: 2
-config.py: 11
-lock.py: 4
-main.py: 1
-models.py: 0
-output.py: 3
-phases.py: 6
-rclone_backend.py: 4
-remote_files.py: 4
-reservation.py: 6
-results.py: 10
-state.py: 0
-summary.py: 1
-targets.py: 1
-upload.py: 4
-utils.py: 9
-verification.py: 2
-PACKAGE_TOP_LEVEL_FUNCTIONS=72
-ENTRYPOINT_TOP_LEVEL_FUNCTIONS=0
+CONFIGURATION COMPATIBILITY
+---------------------------
+config.json SHA-256 is unchanged from v0.0.18:
+7889fb2e031abdb914c99393ec2060f8af68b9ca189eb87cf94ae1361326711c
 
-The compatibility executable contains zero top-level application function
-definitions. The package contains 72 top-level application functions, matching
-the v0.0.17 application-function count used as the refactor baseline.
+config.example.json SHA-256 is unchanged from v0.0.18:
+67df2df0d7cac8750c6b0922e093b7a350df6168ff8028fe833264c2a9ccefe5
 
-Regression / integration tests
-------------------------------
+The packaged production values remain:
+- upload_threads: 4
+- cleanup_threads: 4
+- remote_quota_cleanup_threads: 4
+- trash_cleanup_threads: 4
+- GDrive max_total_size: 12G
+- Mega max_total_size: 12G
+- OneDrive max_total_size: 50G
+
+BEHAVIOR PRESERVED
+------------------
+- Oldest-first deletion ordering.
+- Complete-file deletion; files are not partially selected.
+- Reservation selects until selected bytes are at least the exact calculated deficit.
+- 1 MiB reservation safety headroom.
+- One-byte transfer-cap allowance.
+- --cutoff-mode CAUTIOUS.
+- copy, sync, and move upload command support.
+- Backend-specific hard-delete options for Drive, MEGA, and OneDrive.
+- Independent per-remote pipelines with no global snapshot/reservation barrier.
+- Post-upload cleanup after failed or partially transferred uploads.
+- Final live verification.
+- Per-remote stage/error retention and FINAL RUN RESULT.
+
+BEHAVIOR OPTIMIZED
+------------------
+- Removed standalone rclone delete --min-age remote traversal.
+- Age deletion is planned from snapshot ModTime values.
+- Removed individual cleanup-target lsjson calls.
+- Removed separate remote-quota lsjson calls.
+- Removed repeated reservation cleanup passes and their local/remote re-reads.
+- Added mutable working snapshots; planned deletions are removed from the in-memory
+  working state immediately so subsequent rules see simulated post-delete state.
+- Added one combined RemoteDeletePlan per remote snapshot cleanup phase.
+- Added concurrent single-flight local rclone size caching keyed by normalized local
+  path plus source-selection filters.
+- Combined post-upload cleanup rule and max_total_size planning into one snapshot.
+- Combined all final rule/quota verification into one final snapshot per remote.
+
+TEST RESULT
+-----------
 Command:
-  PYTHONPATH=. python3 -m unittest discover -s tests -v
+python3 -m unittest discover -s tests -v
 
 Result:
-----------------------------------------------------------------------
-Ran 9 tests in 8.900s
-
+Ran 10 tests
 OK
 
-The nine tests comprise eight focused logic/concurrency regressions and one
-full-flow integration test. The integration test runs the real v0.0.18 entry
-point against a temporary fake rclone executable and locked state store. It
-exercises reservation deletion, repeated remote/local state reads, upload,
-post-upload cleanup, final verification, final result reporting, and verifies
-that a fast remote can start upload before a slower remote finishes reservation.
+The ten tests cover:
+1. size and rclone-duration parsing;
+2. source-selection filter forwarding;
+3. managed snapshot union/deduplication for overlapping cleanup rules;
+4. one-snapshot sequential age -> rule-limit -> reservation planning;
+5. concurrent single-flight local source sizing;
+6. one delete command for a combined single-mode delete plan;
+7. upload buffer/filter/reserved-transfer-cap construction;
+8. independent remote pipelines with no global first-snapshot barrier;
+9. packaged production config values;
+10. full real-entry-point fake-rclone integration.
 
-README / config checks
-----------------------
-README_REQUIRED_PREFIX=True
-README_HAS_DATA_LOSS_WARNING=True
-README_VERSION_0_0_18=True
-CONFIG_THREAD_LIMITS={'upload_threads': 4, 'cleanup_threads': 4, 'remote_quota_cleanup_threads': 4, 'trash_cleanup_threads': 4}
-CONFIG_REMOTE_NAMES=['GDrive', 'Mega', 'OneDrive']
-CONFIG_MAX_TOTAL_SIZES=['12G', '12G', '50G']
+FAKE-RCLONE INTEGRATION ASSERTIONS
+---------------------------------
+The integration test executes rclone-multithreaded-upload.py using a temporary fake
+rclone executable and temporary remote state store.
 
-Behavior boundaries preserved / checked
----------------------------------------
-- Shared RuntimeState values are read through STATE at call time to avoid stale
-  imported scalar and Path values after load_config().
-- One recursive remote-root lsjson listing is used for managed max_total_size
-  accounting, with cleanup-rule filtering and relative-path deduplication in
-  Python.
-- Root cleanup rule bookkeeping retains source_folder="/".
-- Oldest-first selection uses parsed UTC ModTime and complete files.
-- Reservation frees at least the exact calculated byte deficit.
-- Reservation rechecks live local and remote state and can repeat up to 10 passes.
-- Positive reserved uploads use reserved-bytes + 1 with --cutoff-mode CAUTIOUS.
-- Per-remote reservation/trash/sleep/upload pipelines remain independent; there
-  is no global reservation barrier.
-- Post-upload cleanup, remote quota cleanup, trash cleanup, and final verification
-  still run after a failed/partial upload pipeline.
-- Drive, MEGA, and OneDrive backend-specific direct-delete mappings remain in the
-  backend helper module.
-- The production config values used by this package remain four threads in each
-  configured category, GDrive/Mega/OneDrive, and 12G/12G/50G max_total_size.
+It asserts:
+- fast:root executes exactly 3 lsjson commands;
+- slow:root executes exactly 3 lsjson commands;
+- identical local source/filter combinations execute exactly 1 rclone size command;
+- no standalone age-delete traversal is executed;
+- both remotes execute planned deletion;
+- both remotes upload;
+- final remote state satisfies max_total_size;
+- final application result is SUCCESS;
+- the fast remote starts upload before the slow remote finishes its first snapshot.
 
-Limitations
------------
-No destructive end-to-end run was performed against the user's real cloud
-remotes for v0.0.18. The fake-rclone integration validates application flow and
-state transitions but cannot reproduce provider APIs, throttling, trash/recycle
-semantics, crypt backend behavior, or provider-specific rclone errors. A
-controlled live run is still required for provider-specific production proof.
+REAL CLOUD LIMITATION
+---------------------
+No destructive test was run against the user's real GDrive, MEGA, or OneDrive
+remotes. The test environment validates application planning, command flow,
+concurrency, delete-list behavior, upload state mutation, cleanup, and verification.
+It cannot reproduce provider-side pagination timing, throttling, trash semantics,
+crypt/backend behavior, or concurrent external changes to a live remote.
+
+v0.0.19 intentionally reduces live re-reading. A live remote can change after a
+snapshot is read. The remaining safety layers are the 1 MiB reservation headroom,
+reserved upload transfer cap, post-upload live snapshot/cleanup, and final live
+snapshot verification. These reduce risk but do not eliminate destructive-operation
+risk.

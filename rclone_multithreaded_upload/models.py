@@ -1,23 +1,11 @@
-"""Shared data models for rclone-multithreaded-upload.
-
-These dataclasses are intentionally free of rclone execution and workflow
-orchestration so the application modules can share the same data structures.
-"""
+"""Shared data models for rclone-multithreaded-upload."""
 
 from dataclasses import dataclass, field
 
 
 @dataclass
 class DirectoryCleanupRule:
-    """
-    One cleanup rule owned by one UploadDirectory.
-
-    path is relative to the owning upload.remote_path. A path of "/" means the
-    root of that remote_path.
-
-    Optional boolean values override the owning upload defaults. None means
-    inherit the upload-level setting.
-    """
+    """One cleanup rule owned by one UploadDirectory."""
 
     path: str
     max_files: int | None = None
@@ -58,21 +46,49 @@ class CleanupTarget:
     owner_remote_path: str = ""
 
 
-@dataclass
+@dataclass(frozen=True)
 class RemoteFile:
+    """One file returned by the recursive remote lsjson snapshot."""
+
     path: str
     size: int
     modified: str
 
 
-@dataclass
+@dataclass(frozen=True)
 class RemoteQuotaFile:
-    """File relative to UploadDirectory.remote_path."""
+    """Compatibility model for a managed file relative to one upload root."""
 
     path: str
     size: int
     modified: str
     source_folder: str
+
+
+@dataclass
+class RemoteSnapshot:
+    """One in-memory recursive file snapshot for an upload remote root."""
+
+    remote_path: str
+    files_by_path: dict[str, RemoteFile] = field(default_factory=dict)
+
+
+@dataclass
+class PlannedDeletion:
+    """One file selected for deletion from a working snapshot."""
+
+    file: RemoteFile
+    delete_to_trash: bool
+    reason: str
+
+
+@dataclass
+class RemoteDeletePlan:
+    """Combined deletion plan for one remote and one snapshot phase."""
+
+    remote_path: str
+    phase_name: str
+    entries: dict[str, PlannedDeletion] = field(default_factory=dict)
 
 
 @dataclass

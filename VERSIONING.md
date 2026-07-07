@@ -10,6 +10,55 @@ Rollover rule:
 
 `0.0.100` is not used.
 
+## 0.0.19
+
+Three-snapshot remote planner and request-reduction release.
+
+### Code
+
+- Incremented the application version from `0.0.18` to `0.0.19`.
+- Replaced repeated cleanup/reservation remote re-listing with one pre-upload `RemoteSnapshot` per remote.
+- Added `planning.py` for in-memory age, `max_files`, `max_size`, `max_total_size`, and upload-reservation planning.
+- Added `delete_plan.py` for one combined deletion plan per remote snapshot phase.
+- Age cleanup now uses snapshot `ModTime` data instead of a separate `rclone delete --min-age` traversal.
+- Cleanup decisions immediately remove selected paths from the working snapshot so later rules see simulated post-delete state.
+- Pre-upload cleanup and upload reservation use the same pre-upload snapshot and normally one combined delete command per delete mode.
+- Removed the repeated ten-pass reservation listing loop.
+- Added a concurrent single-flight local-size cache keyed by normalized local path plus source-selection filter options.
+- Identical local source/filter combinations now run `rclone size --json` once and share the result between remote pipelines.
+- Post-upload age, cleanup-rule, and `max_total_size` planning now use one post-upload snapshot per remote.
+- Final cleanup-rule and `max_total_size` verification now use one final snapshot per remote.
+- Preserved oldest-first whole-file selection, exact byte-deficit reservation, 1 MiB safety headroom, transfer cap, `--cutoff-mode CAUTIOUS`, backend hard-delete flags, per-remote concurrency, post-cleanup after failed uploads, and final result accounting.
+- Preserved mixed trash/hard-delete cleanup-rule support by grouping a combined plan by delete mode only when required.
+
+### Normal remote listing count
+
+A normal successful remote now executes exactly three recursive `rclone lsjson` commands:
+
+1. pre-upload planning;
+2. post-upload cleanup planning;
+3. final live verification.
+
+This count refers to recursive rclone listing commands, not provider HTTP transactions. Rclone may paginate internally, and delete/upload/optional trash-cleanup commands remain separate work.
+
+### Configuration
+
+- Kept `config.json` and `config.example.json` schema and values unchanged.
+- Kept all four thread-limit fields for compatibility.
+- Combined post-cleanup/final worker pools use the higher of `cleanup_threads` and `remote_quota_cleanup_threads`.
+- Added no required configuration field.
+
+### Verification
+
+- Passed ten non-destructive tests.
+- The real-entry-point fake-rclone integration test asserts exactly three `lsjson` calls per remote.
+- The integration test asserts one local `rclone size` call for identical local source/filter combinations.
+- The integration test asserts there is no standalone age-delete traversal.
+- Preserved the independent remote pipeline: the fast remote uploads before the slow remote finishes its first snapshot.
+- Compiled every module and imported every package module.
+- Verified `--version`, `--help`, and `--validate-config`.
+- Did not run destructive tests against real cloud remotes.
+
 ## 0.0.18
 
 Full application modularization release.
@@ -117,4 +166,4 @@ First modularization release: safest shared-model extraction.
 - Kept all 72 top-level application functions in `rclone-multithreaded-upload.py`.
 - Tracked `output.py` as the next recommended extraction after dependency review.
 
-This packaged `VERSIONING.md` records the modularization history from v0.0.14 onward. Older release details remain in the prior project history; v0.0.18 does not rewrite those historical entries.
+This packaged `VERSIONING.md` records the modularization history from v0.0.14 onward. Older release details remain in the prior project history; v0.0.19 does not rewrite those historical entries.

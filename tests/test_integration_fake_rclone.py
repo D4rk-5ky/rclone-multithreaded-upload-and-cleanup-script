@@ -1,7 +1,7 @@
 """End-to-end integration test using a fake rclone executable.
 
-This executes the real compatibility entry point and all package phases without
-contacting a real provider or deleting cloud data.
+This executes the real compatibility entry point and verifies the three-snapshot
+remote flow without contacting a real provider or deleting cloud data.
 """
 
 import json
@@ -160,11 +160,8 @@ class FakeRcloneIntegrationTests(unittest.TestCase):
             fake_rclone.chmod(0o755)
 
             fast_local = temp / "fast-local"
-            slow_local = temp / "slow-local"
             fast_local.mkdir()
-            slow_local.mkdir()
             (fast_local / "new.bin").write_bytes(b"F" * (300 * 1024))
-            (slow_local / "new.bin").write_bytes(b"S" * (300 * 1024))
 
             state_path = temp / "state.json"
             old_a = "2026-01-01T00:00:00Z"
@@ -218,7 +215,7 @@ class FakeRcloneIntegrationTests(unittest.TestCase):
                             },
                             {
                                 "name": "Slow",
-                                "local_path": str(slow_local),
+                                "local_path": str(fast_local),
                                 "remote_path": "slow:root",
                                 "upload_command": "copy",
                                 "delete_old_files": False,
@@ -292,18 +289,30 @@ class FakeRcloneIntegrationTests(unittest.TestCase):
             self.assertEqual(delete_remotes, {"fast:root", "slow:root"})
             self.assertEqual(copy_remotes, {"fast:root", "slow:root"})
 
+            lsjson_counts = {
+                remote: sum(
+                    1 for item in records
+                    if item["event"] == "lsjson-start" and item["remote"] == remote
+                )
+                for remote in ("fast:root", "slow:root")
+            }
+            self.assertEqual(lsjson_counts, {"fast:root": 3, "slow:root": 3})
+            self.assertEqual(
+                sum(1 for item in records if item["event"] == "size"),
+                1,
+                "identical local source/filter combinations should be sized once",
+            )
+            self.assertFalse(any(item["event"] == "delete-age" for item in records))
+
             fast_copy_time = min(
                 item["time"]
                 for item in records
                 if item["event"] == "copy" and item["remote"] == "fast:root"
             )
-            slow_reservation_listing_end = next(
+            slow_reservation_listing_end = min(
                 item["time"]
                 for item in records
                 if item["event"] == "lsjson-end" and item["remote"] == "slow:root"
-                and item["time"] > min(
-                    x["time"] for x in records if x["event"] == "size" and x["remote"] == str(slow_local)
-                )
             )
             self.assertLess(
                 fast_copy_time,

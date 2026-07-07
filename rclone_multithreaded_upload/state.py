@@ -25,7 +25,6 @@ class RuntimeState:
     delete_list_dir: Path = Path("/root/rclone")
     sleep_after_step: int = 5
     reservation_safety_headroom_bytes: int = 1 * 1024**2
-    max_reservation_cleanup_passes: int = 10
     lock_created: bool = False
     reserved_upload_bytes: dict[str, int] = field(default_factory=dict)
     reserved_upload_bytes_lock: threading.Lock = field(

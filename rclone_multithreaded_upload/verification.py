@@ -1,97 +1,74 @@
-"""Final cleanup-rule and remote-quota verification."""
+"""Final per-remote verification from one recursive snapshot."""
 
-from .models import CleanupTarget, UploadDirectory
+from .models import CleanupTarget, RemoteSnapshot, UploadDirectory
 from .output import print_job_block
-from .remote_files import get_remote_file_entries, get_upload_remote_quota_entries
+from .remote_files import (
+    files_below_relative_path,
+    get_managed_snapshot_files,
+    relative_cleanup_target_path,
+)
 from .results import record_stage_failure
 from .utils import format_bytes, parse_size_to_bytes
 
 
-def verify_one_cleanup_target(job_number: int, target: CleanupTarget) -> bool:
-    """Verify max_files/max_size for one cleanup target."""
-    if not target.delete_excess_files:
-        return True
-    if target.max_files is None and target.max_size is None:
-        return True
-
-    try:
-        files = get_remote_file_entries(target.path)
-    except Exception as error:
-        detail = f"Verification listing failed: {error}"
-        record_stage_failure(target.owner_remote_path, "final_quota", detail)
-        print_job_block("VERIFY CLEANUP TARGET", job_number, target.path, detail)
-        return False
-
-    file_count = len(files)
-    total_size = sum(file.size for file in files)
+def verify_upload_snapshot(
+    job_number: int,
+    upload: UploadDirectory,
+    targets: list[CleanupTarget],
+    snapshot: RemoteSnapshot,
+) -> bool:
+    """Verify every cleanup limit and max_total_size using the same live snapshot."""
     failures: list[str] = []
 
-    if target.max_files is not None and file_count > target.max_files:
-        failures.append(f"file count {file_count} exceeds max_files {target.max_files}")
+    for target in targets:
+        if not target.delete_excess_files:
+            continue
+        if target.max_files is None and target.max_size is None:
+            continue
 
-    if target.max_size is not None:
-        max_size_bytes = parse_size_to_bytes(target.max_size)
-        if total_size > max_size_bytes:
+        try:
+            relative_path = relative_cleanup_target_path(upload, target)
+            files = files_below_relative_path(snapshot, relative_path)
+        except Exception as error:
+            failures.append(f"{target.path}: verification filtering failed: {error}")
+            continue
+
+        file_count = len(files)
+        total_size = sum(file.size for file in files)
+        if target.max_files is not None and file_count > target.max_files:
             failures.append(
-                f"size {format_bytes(total_size)} exceeds max_size {target.max_size}"
+                f"{target.path}: file count {file_count} exceeds max_files {target.max_files}"
+            )
+        if target.max_size is not None:
+            max_size_bytes = parse_size_to_bytes(target.max_size)
+            if total_size > max_size_bytes:
+                failures.append(
+                    f"{target.path}: size {format_bytes(total_size)} exceeds max_size {target.max_size}"
+                )
+
+    if upload.delete_excess_files and upload.max_total_size is not None:
+        managed_files = get_managed_snapshot_files(upload, snapshot)
+        managed_size = sum(file.size for file in managed_files)
+        max_total_size_bytes = parse_size_to_bytes(upload.max_total_size)
+        if managed_size > max_total_size_bytes:
+            failures.append(
+                f"managed size {format_bytes(managed_size)} exceeds max_total_size "
+                f"{format_bytes(max_total_size_bytes)}"
             )
 
     if failures:
-        detail = "Final cleanup target verification FAILED:\n  " + "\n  ".join(failures)
-        record_stage_failure(target.owner_remote_path, "final_quota", detail)
-        print_job_block("VERIFY CLEANUP TARGET", job_number, target.path, detail)
+        detail = "Final snapshot verification FAILED:\n  " + "\n  ".join(failures)
+        record_stage_failure(upload.remote_path, "final_quota", detail)
+        print_job_block("FINAL SNAPSHOT VERIFY", job_number, upload.remote_path, detail)
         return False
 
     print_job_block(
-        "VERIFY CLEANUP TARGET",
-        job_number,
-        target.path,
-        (
-            "Final cleanup target verification passed.\n"
-            f"Files: {file_count}\n"
-            f"Size : {format_bytes(total_size)}"
-        ),
-    )
-    return True
-
-
-def verify_one_upload_remote_quota(
-    job_number: int,
-    upload: UploadDirectory,
-) -> bool:
-    """Verify the final managed size is at or below max_total_size."""
-    if not upload.delete_excess_files or upload.max_total_size is None:
-        return True
-
-    try:
-        files = get_upload_remote_quota_entries(upload)
-    except Exception as error:
-        detail = f"Final quota verification listing failed: {error}"
-        record_stage_failure(upload.remote_path, "final_quota", detail)
-        print_job_block("VERIFY REMOTE QUOTA", job_number, upload.remote_path, detail)
-        return False
-
-    total_size = sum(file.size for file in files)
-    max_total_size_bytes = parse_size_to_bytes(upload.max_total_size)
-
-    if total_size > max_total_size_bytes:
-        detail = (
-            "Final remote quota verification FAILED.\n"
-            f"Managed size  : {format_bytes(total_size)}\n"
-            f"Max total size: {format_bytes(max_total_size_bytes)}"
-        )
-        record_stage_failure(upload.remote_path, "final_quota", detail)
-        print_job_block("VERIFY REMOTE QUOTA", job_number, upload.remote_path, detail)
-        return False
-
-    print_job_block(
-        "VERIFY REMOTE QUOTA",
+        "FINAL SNAPSHOT VERIFY",
         job_number,
         upload.remote_path,
         (
-            "Final remote quota verification passed.\n"
-            f"Managed size  : {format_bytes(total_size)}\n"
-            f"Max total size: {format_bytes(max_total_size_bytes)}"
+            "Final cleanup and quota verification passed using one recursive snapshot.\n"
+            f"Remote files in snapshot: {len(snapshot.files_by_path)}"
         ),
     )
     return True
