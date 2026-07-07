@@ -1,0 +1,124 @@
+rclone-multithreaded-upload v0.0.18 verification report
+========================================================
+
+Scope
+-----
+This report validates the full module extraction from the v0.0.17-style
+single executable into the v0.0.18 package layout. Validation is intentionally
+non-destructive and does not contact the configured GDrive, MEGA, or OneDrive
+remotes.
+
+Version / CLI
+-------------
+Version command: rclone-multithreaded-upload.py 0.0.18
+--help: PASS
+--config ./config.json --validate-config: PASS
+
+Compilation / imports
+---------------------
+python3 -m compileall -q .: PASS
+MODULE_COUNT=19
+rclone_multithreaded_upload.cleanup
+rclone_multithreaded_upload.cli
+rclone_multithreaded_upload.commands
+rclone_multithreaded_upload.config
+rclone_multithreaded_upload.lock
+rclone_multithreaded_upload.main
+rclone_multithreaded_upload.models
+rclone_multithreaded_upload.output
+rclone_multithreaded_upload.phases
+rclone_multithreaded_upload.rclone_backend
+rclone_multithreaded_upload.remote_files
+rclone_multithreaded_upload.reservation
+rclone_multithreaded_upload.results
+rclone_multithreaded_upload.state
+rclone_multithreaded_upload.summary
+rclone_multithreaded_upload.targets
+rclone_multithreaded_upload.upload
+rclone_multithreaded_upload.utils
+rclone_multithreaded_upload.verification
+
+Structural extraction
+---------------------
+__init__.py: 0
+cleanup.py: 3
+cli.py: 1
+commands.py: 2
+config.py: 11
+lock.py: 4
+main.py: 1
+models.py: 0
+output.py: 3
+phases.py: 6
+rclone_backend.py: 4
+remote_files.py: 4
+reservation.py: 6
+results.py: 10
+state.py: 0
+summary.py: 1
+targets.py: 1
+upload.py: 4
+utils.py: 9
+verification.py: 2
+PACKAGE_TOP_LEVEL_FUNCTIONS=72
+ENTRYPOINT_TOP_LEVEL_FUNCTIONS=0
+
+The compatibility executable contains zero top-level application function
+definitions. The package contains 72 top-level application functions, matching
+the v0.0.17 application-function count used as the refactor baseline.
+
+Regression / integration tests
+------------------------------
+Command:
+  PYTHONPATH=. python3 -m unittest discover -s tests -v
+
+Result:
+----------------------------------------------------------------------
+Ran 9 tests in 8.900s
+
+OK
+
+The nine tests comprise eight focused logic/concurrency regressions and one
+full-flow integration test. The integration test runs the real v0.0.18 entry
+point against a temporary fake rclone executable and locked state store. It
+exercises reservation deletion, repeated remote/local state reads, upload,
+post-upload cleanup, final verification, final result reporting, and verifies
+that a fast remote can start upload before a slower remote finishes reservation.
+
+README / config checks
+----------------------
+README_REQUIRED_PREFIX=True
+README_HAS_DATA_LOSS_WARNING=True
+README_VERSION_0_0_18=True
+CONFIG_THREAD_LIMITS={'upload_threads': 4, 'cleanup_threads': 4, 'remote_quota_cleanup_threads': 4, 'trash_cleanup_threads': 4}
+CONFIG_REMOTE_NAMES=['GDrive', 'Mega', 'OneDrive']
+CONFIG_MAX_TOTAL_SIZES=['12G', '12G', '50G']
+
+Behavior boundaries preserved / checked
+---------------------------------------
+- Shared RuntimeState values are read through STATE at call time to avoid stale
+  imported scalar and Path values after load_config().
+- One recursive remote-root lsjson listing is used for managed max_total_size
+  accounting, with cleanup-rule filtering and relative-path deduplication in
+  Python.
+- Root cleanup rule bookkeeping retains source_folder="/".
+- Oldest-first selection uses parsed UTC ModTime and complete files.
+- Reservation frees at least the exact calculated byte deficit.
+- Reservation rechecks live local and remote state and can repeat up to 10 passes.
+- Positive reserved uploads use reserved-bytes + 1 with --cutoff-mode CAUTIOUS.
+- Per-remote reservation/trash/sleep/upload pipelines remain independent; there
+  is no global reservation barrier.
+- Post-upload cleanup, remote quota cleanup, trash cleanup, and final verification
+  still run after a failed/partial upload pipeline.
+- Drive, MEGA, and OneDrive backend-specific direct-delete mappings remain in the
+  backend helper module.
+- The production config values used by this package remain four threads in each
+  configured category, GDrive/Mega/OneDrive, and 12G/12G/50G max_total_size.
+
+Limitations
+-----------
+No destructive end-to-end run was performed against the user's real cloud
+remotes for v0.0.18. The fake-rclone integration validates application flow and
+state transitions but cannot reproduce provider APIs, throttling, trash/recycle
+semantics, crypt backend behavior, or provider-specific rclone errors. A
+controlled live run is still required for provider-specific production proof.

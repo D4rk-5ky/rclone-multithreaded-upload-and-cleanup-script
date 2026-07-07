@@ -18,6 +18,7 @@ class DirectoryCleanupRule:
     Optional boolean values override the owning upload defaults. None means
     inherit the upload-level setting.
     """
+
     path: str
     max_files: int | None = None
     max_size: str | None = None
@@ -28,22 +29,14 @@ class DirectoryCleanupRule:
 
 @dataclass
 class UploadDirectory:
-    """
-    One local source and one rclone destination.
-    """
+    """One local source and one rclone destination."""
+
     local_path: str
     remote_path: str
     copy_options: list[str]
     cleanup_rules: list[DirectoryCleanupRule]
-
-    # Optional short name used in the final per-remote result summary.
-    # When omitted, remote_path is used.
     name: str | None = None
-
-    # Optional rclone per-transfer buffer size for this destination.
-    # Examples: "16M", "64M", "128M". None disables the explicit option.
     buffer_size: str | None = None
-
     upload_command: str = "copy"
     delete_old_files: bool = True
     delete_excess_files: bool = True
@@ -54,17 +47,14 @@ class UploadDirectory:
 
 @dataclass
 class CleanupTarget:
-    """
-    A generated full remote cleanup target.
-    """
+    """A generated full remote cleanup target."""
+
     path: str
     max_files: int | None = None
     max_size: str | None = None
     delete_old_files: bool = True
     delete_excess_files: bool = True
     delete_to_trash: bool = False
-
-    # Owning upload remote. Used only for per-remote result accounting.
     owner_remote_path: str = ""
 
 
@@ -77,9 +67,8 @@ class RemoteFile:
 
 @dataclass
 class RemoteQuotaFile:
-    """
-    File relative to UploadDirectory.remote_path.
-    """
+    """File relative to UploadDirectory.remote_path."""
+
     path: str
     size: int
     modified: str
@@ -89,6 +78,7 @@ class RemoteQuotaFile:
 @dataclass
 class StageRunResult:
     """One final-summary stage for one upload remote."""
+
     status: str = "PENDING"
     errors: list[str] = field(default_factory=list)
 
@@ -96,6 +86,7 @@ class StageRunResult:
 @dataclass
 class RemoteRunResult:
     """Per-remote state retained until FINAL RUN RESULT is printed."""
+
     name: str
     remote_path: str
     reservation: StageRunResult = field(default_factory=StageRunResult)
