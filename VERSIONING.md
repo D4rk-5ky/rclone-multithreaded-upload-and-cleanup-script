@@ -10,6 +10,33 @@ Rollover rule:
 
 `0.0.100` is not used.
 
+## 0.0.21
+
+Complete CLI self-documentation release.
+
+### Code
+
+- Incremented the application version from `0.0.20` to `0.0.21`.
+- Added `FullHelpArgumentParser`, which prints the complete CLI help text for every argparse parsing error before the specific error message.
+- Added `build_cli_parser()` so parser construction, examples, flag definitions, and help text have one testable source of truth.
+- Kept `parse_cli_args()` as the application entry point while allowing an optional argument sequence for direct regression testing.
+- Added explicit help text for `--version`; every supported user-facing flag now has a visible explanation in `--help`.
+- Added CLI examples to the built-in help text.
+- Preserved argparse exit status `2` for invalid CLI syntax and all existing runtime exit behavior.
+
+### Documentation
+
+- Updated `README.md` to list every CLI flag, explain whether a config is required, and document the full-help-on-error behavior.
+- Updated `commented_code_map.md` for the new parser class/functions and why they exist.
+- Configuration schema and both config examples are unchanged because this release adds no config option.
+
+### Tests and verification
+
+- Added regression coverage that `--help` contains every supported flag and its explanation.
+- Added regression coverage that an unknown flag exits with status `2`, prints the complete help/options list, and reports the invalid flag.
+- Added regression coverage that missing required `--config` also prints the complete help/options list.
+- Re-ran compile, import, CLI, config-validation, unit, and fake-rclone integration checks before packaging.
+
 ## 0.0.20
 
 Barriered stage execution and worker-failure isolation release.

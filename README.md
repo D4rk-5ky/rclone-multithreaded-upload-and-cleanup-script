@@ -33,7 +33,7 @@ Always test with disposable data or a test remote first, run `--validate-config`
 
 # rclone-multithreaded-upload
 
-Version 0.0.20
+Version 0.0.21
 
 `rclone-multithreaded-upload` uploads one or more local directories to independent rclone destinations while enforcing configured age, file-count, folder-size, and managed remote-size limits.
 
@@ -170,9 +170,18 @@ Identical local source/filter combinations share one concurrent size calculation
 
 The Python application itself uses only the standard library.
 
-## CLI commands
+## CLI commands and flags
 
-Show help and every CLI option:
+The executable has four user-facing option groups. `--help` documents all of them:
+
+| Flag | Meaning |
+| --- | --- |
+| `-h`, `--help` | Print the complete CLI help, including every supported flag, examples, and usage, then exit. A config file is not required. |
+| `-c PATH`, `--config PATH` | Path to the JSON configuration file. Required for a normal run and for `--validate-config`. The filename extension is not enforced; the content must be valid JSON. |
+| `--validate-config` | Load and validate the config, print the effective startup summary, then exit without creating the lock file or running any rclone command. Must be used together with `-c/--config`. |
+| `--version` | Print the application version and exit. A config file is not required. |
+
+Show the complete help:
 
 ```bash
 ./rclone-multithreaded-upload.py --help
@@ -184,7 +193,7 @@ Show the application version:
 ./rclone-multithreaded-upload.py --version
 ```
 
-Validate a config file without creating the lock file and without executing rclone commands:
+Validate a config without touching the lock file or any remote:
 
 ```bash
 ./rclone-multithreaded-upload.py --config ./config.json --validate-config
@@ -196,13 +205,27 @@ Run normally:
 ./rclone-multithreaded-upload.py --config ./config.json
 ```
 
-`-c` is the short form of `--config`:
+The short config form is equivalent:
 
 ```bash
 ./rclone-multithreaded-upload.py -c ./config.json
 ```
 
-The config filename extension is not enforced; the file content must be valid JSON.
+### Invalid or misspelled flags
+
+Any command-line parsing error exits with status `2` and prints the **complete help text first**, including all supported flags and their explanations. This applies to unknown flags, missing required `--config`, and other invalid CLI syntax.
+
+For example:
+
+```bash
+./rclone-multithreaded-upload.py --config ./config.json --wrong-flag
+```
+
+prints the full help/options list and then an error such as:
+
+```text
+error: unrecognized arguments: --wrong-flag
+```
 
 ## Exit behavior
 

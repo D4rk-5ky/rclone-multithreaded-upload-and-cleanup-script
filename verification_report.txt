@@ -1,143 +1,91 @@
-rclone-multithreaded-upload v0.0.20 verification report
+rclone-multithreaded-upload v0.0.21 verification report
 Date: 2026-09-07
 
 SCOPE
 -----
-This release changes stage orchestration so cleanup/reservation, trash cleanup,
-upload, post-upload cleanup, post-upload trash cleanup, and final verification
-have explicit barriers between them. Worker failures remain isolated so one failed
-remote does not cancel unrelated remotes.
+This release improves only the command-line parser, built-in CLI documentation,
+and regression coverage. Upload, cleanup, reservation, deletion, stage-barrier,
+threading, and safety behavior are unchanged from v0.0.20.
 
-BASELINE ARCHIVE FINDING
-------------------------
-The uploaded v0.0.19 ZIP did not contain config.json.
+CLI HELP BEHAVIOR
+-----------------
+The executable now documents every supported user-facing flag in --help:
 
-However, its packaged SHA256SUMS, tests/test_logic.py, and old verification report
-referred to config.json. This made the original archive's own regression suite fail
-1 of 10 tests and made `sha256sum -c SHA256SUMS` report one missing file.
+- -h / --help
+  Prints the complete CLI help, including every flag, explanation, examples,
+  and the usage line, then exits.
 
-No production config.json was reconstructed or invented in v0.0.20. The packaged
-config regression now validates config.example.json, which is actually present.
-SHA256SUMS is rebuilt from files actually included in the release.
+- -c PATH / --config PATH
+  Selects the JSON configuration file. Required for normal runs and for
+  --validate-config.
 
-CURRENT STAGE ORDER
--------------------
-1. PRE-UPLOAD preparation for all remotes
-   - recursive snapshot
-   - cleanup rule planning
-   - optional filtered local sizing
-   - max_total_size reservation planning
-   - combined delete execution
+- --validate-config
+  Loads and validates the config, prints the effective startup summary, then
+  exits without lock creation or rclone execution.
 
-   Global barrier: every preparation worker finishes.
+- --version
+  Prints the application version and exits without requiring a config file.
 
-2. PRE-UPLOAD trash cleanup for eligible remotes
-   - optional rclone cleanup
-   - sleep_after_step
+INVALID CLI INPUT
+-----------------
+FullHelpArgumentParser overrides argparse's normal terse error path.
 
-   Global barrier: every eligible trash-cleanup worker finishes.
+Any CLI parsing error now:
+1. prints the complete help/options text;
+2. prints the specific argparse error;
+3. exits with argparse status 2.
 
-3. UPLOAD for remotes whose prerequisite stages succeeded
+Verified examples include:
+- unknown/misspelled option: --wrong-flag;
+- missing required -c/--config.
 
-   Global barrier: every upload worker finishes.
+The normal --help and --version paths still exit successfully without requiring
+a configuration file.
 
-4. POST-UPLOAD cleanup for all remotes
-   - recursive snapshot
-   - cleanup-rule planning
-   - max_total_size planning
-   - combined delete execution
-
-   Global barrier: every post-upload cleanup worker finishes.
-
-5. POST-UPLOAD trash cleanup for eligible remotes
-
-   Global barrier: every eligible post-upload trash worker finishes.
-
-6. FINAL verification for all remotes
-
-FAILURE ISOLATION VERIFIED
---------------------------
-- One PRE-UPLOAD preparation failure does not stop the other remotes from uploading.
-- A remote whose PRE-UPLOAD prerequisite failed is skipped for upload.
-- One upload failure does not cancel sibling upload workers.
-- One POST-UPLOAD cleanup failure does not cancel the other remotes.
-- POST-UPLOAD trash cleanup only runs for remotes whose cleanup/delete stage passed.
-- Final verification still runs after earlier upload failures in the normal main flow.
-
-SAFETY BEHAVIOR PRESERVED
--------------------------
-- Three recursive live snapshots per normal successful remote: PRE-UPLOAD,
-  POST-UPLOAD, and FINAL.
-- Oldest-first deletion ordering using timezone-aware rclone ModTime.
-- Complete-file selection; no partial-file deletion planning.
-- Mutable working snapshot removes already-selected paths before later rules.
-- Combined deletion plan and one delete command per required delete mode.
-- Mixed trash/hard-delete cleanup rule support.
-- Deduplicated managed-file union for overlapping cleanup rules.
-- Exact reservation deficit selection.
-- 1 MiB reservation safety headroom.
-- One-byte upload transfer-cap allowance.
-- --cutoff-mode CAUTIOUS.
-- copy, sync, and move upload command restriction.
-- Backend-specific direct-delete flags for Drive, MEGA, and OneDrive.
-- Unsupported rclone cleanup treated as a supported skip.
-- Post-upload cleanup/final verification continue after failed/partial uploads.
-- Per-remote error retention and final non-zero result when a required stage fails.
-
-THREAD LIMITS
+DOCUMENTATION
 -------------
-- upload_threads: upload worker pool only.
-- trash_cleanup_threads: PRE-UPLOAD and POST-UPLOAD trash-cleanup pools.
-- cleanup_threads + remote_quota_cleanup_threads: combined cleanup/quota stages use
-  max(cleanup_threads, remote_quota_cleanup_threads), because one snapshot job plans
-  both kinds of limits.
-
-CONFIG EXAMPLES
----------------
-- config.example.json validates successfully.
-- rclone-cctv-config.example.json validates successfully.
-- The CCTV example was updated from obsolete top-level directory_cleanup_rules to
-  current per-upload cleanup_rules and now demonstrates current per-upload fields.
+- README.md documents current v0.0.21 behavior only and lists every CLI flag.
+- commented_code_map.md documents FullHelpArgumentParser, error(),
+  build_cli_parser(), and parse_cli_args(), including why each exists.
+- VERSIONING.md records the complete v0.0.21 change set.
+- Config schema and both config examples are unchanged because this release adds
+  no configuration option.
 
 FINAL AUTOMATED CHECKS
 ----------------------
-- compileall: PASS for package, compatibility entry point, and tests.
-- package imports: PASS for all 21 package modules discovered by pkgutil.
-- --version: PASS, reports 0.0.20.
-- --help: PASS.
+- --version: PASS, reports 0.0.21.
+- --help: PASS, contains every supported CLI flag and explanation.
+- unknown flag: PASS, exits 2, prints full help, then identifies the bad flag.
+- missing --config: PASS, exits 2 and prints full help before the error.
 - --validate-config config.example.json: PASS.
 - --validate-config rclone-cctv-config.example.json: PASS.
-- unittest discovery: PASS, 14 tests.
-- commented_code_map.md coverage check: PASS; every top-level package function/class
-  name is documented.
-- README current-version check: PASS; README documents 0.0.20 current behavior and
-  contains no old v0.0.14-v0.0.19 release-history references.
+- compileall: PASS for the compatibility entry point, package, and tests.
+- package imports: PASS for all 21 package modules discovered by pkgutil.
+- commented_code_map.md coverage: PASS for every top-level package function/class.
+- README current-version check: PASS.
+- unittest discovery: PASS, 17 tests.
+- fake-rclone integration: PASS.
 
-FAKE-RCLONE INTEGRATION
------------------------
-The integration test runs the real rclone-multithreaded-upload.py entry point with
-a temporary fake rclone executable and temporary remote state.
+NEW CLI REGRESSION TESTS
+------------------------
+The test suite now explicitly verifies:
+- --help includes -h/--help, -c/--config, --validate-config, and --version;
+- each option has user-facing explanatory text;
+- an unknown flag prints the complete help and returns exit status 2;
+- missing required --config also prints the complete help and returns status 2.
 
-It verifies:
-- both remotes complete successfully;
-- exactly 3 recursive lsjson calls per remote;
-- identical local source/filter combinations execute one shared rclone size scan;
-- no standalone age-delete traversal is used;
-- planned delete commands execute;
-- both uploads execute;
-- final max_total_size state is valid;
-- the upload stage does not begin until the slow remote has finished its PRE-UPLOAD
-  listing, proving the preparation barrier.
+SAFETY / RUNTIME BEHAVIOR
+-------------------------
+No upload/cleanup runtime logic was changed in v0.0.21. The v0.0.20 global stage
+barriers, failure isolation, prerequisite skips, three-snapshot planner,
+oldest-first whole-file deletion, reservation headroom, transfer cap, backend
+hard-delete handling, post-upload cleanup, and final verification behavior remain
+unchanged.
 
 NOT FULLY TESTED
 ----------------
 No destructive test was run against real Google Drive, MEGA, OneDrive, crypt
-wrappers, or other live cloud remotes.
-
-The automated environment therefore cannot fully reproduce provider pagination,
-rate limiting, throttling, trash semantics, provider-specific permission errors,
-network interruption behavior, concurrent external changes to a live remote, or
-real long-running rclone transfer timing.
-
-Those behaviors should be tested first with disposable data/test remotes before
-production use.
+wrappers, or other live cloud remotes. Provider pagination, rate limiting,
+throttling, trash semantics, permissions, network interruptions, concurrent live
+remote changes, and real long-running transfers therefore remain outside the
+local automated test environment.

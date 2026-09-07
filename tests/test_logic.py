@@ -1,4 +1,4 @@
-"""Non-destructive regression tests for the snapshot planner and stage barriers."""
+"""Non-destructive regression tests for planning, stage barriers, and CLI help."""
 
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
@@ -57,6 +57,64 @@ class StateSnapshot:
         clear_local_size_cache()
         for key, value in self.values.items():
             setattr(STATE, key, value)
+
+
+class CliHelpTests(unittest.TestCase):
+    """Regression tests for complete built-in CLI documentation."""
+
+    @staticmethod
+    def run_cli(*args):
+        project_root = Path(__file__).resolve().parents[1]
+        return subprocess.run(
+            [str(project_root / "rclone-multithreaded-upload.py"), *args],
+            cwd=project_root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            timeout=10,
+        )
+
+    @staticmethod
+    def assert_complete_flag_help(test_case, output):
+        expected_fragments = (
+            "-h, --help",
+            "-c, --config PATH",
+            "--validate-config",
+            "--version",
+            "Print this complete CLI help",
+            "including every supported",
+            "Path to the JSON configuration file.",
+            "Validate PATH, load all settings",
+            "Print the application version and exit.",
+            "Examples:",
+        )
+        for fragment in expected_fragments:
+            test_case.assertIn(fragment, output)
+
+    def test_help_lists_every_cli_flag_and_explanation(self):
+        result = self.run_cli("--help")
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assert_complete_flag_help(self, result.stdout)
+
+    def test_unknown_flag_prints_complete_help_before_error(self):
+        result = self.run_cli(
+            "--config", "./config.example.json", "--definitely-not-a-real-flag"
+        )
+        self.assertEqual(result.returncode, 2, result.stdout)
+        self.assert_complete_flag_help(self, result.stdout)
+        self.assertIn(
+            "error: unrecognized arguments: --definitely-not-a-real-flag",
+            result.stdout,
+        )
+
+    def test_missing_required_config_prints_complete_help_before_error(self):
+        result = self.run_cli("--validate-config")
+        self.assertEqual(result.returncode, 2, result.stdout)
+        self.assert_complete_flag_help(self, result.stdout)
+        self.assertIn(
+            "error: the following arguments are required: -c/--config",
+            result.stdout,
+        )
 
 
 class LogicTests(unittest.TestCase):

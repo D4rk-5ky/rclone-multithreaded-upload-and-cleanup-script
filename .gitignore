@@ -1,0 +1,4 @@
+*.json 
+rclone_multithreaded_upload/__pycache__/
+
+!config.example.json
