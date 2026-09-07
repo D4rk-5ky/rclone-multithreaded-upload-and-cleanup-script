@@ -1,7 +1,7 @@
 """End-to-end integration test using a fake rclone executable.
 
 This executes the real compatibility entry point and verifies the three-snapshot
-remote flow without contacting a real provider or deleting cloud data.
+remote flow plus stage barriers without contacting a real provider or deleting cloud data.
 """
 
 import json
@@ -148,7 +148,7 @@ sys.exit(2)
 
 
 class FakeRcloneIntegrationTests(unittest.TestCase):
-    def test_complete_application_flow_and_independent_pipeline(self):
+    def test_complete_application_flow_and_stage_barriers(self):
         project_root = Path(__file__).resolve().parents[1]
 
         with tempfile.TemporaryDirectory() as temp_text:
@@ -314,10 +314,10 @@ class FakeRcloneIntegrationTests(unittest.TestCase):
                 for item in records
                 if item["event"] == "lsjson-end" and item["remote"] == "slow:root"
             )
-            self.assertLess(
+            self.assertGreaterEqual(
                 fast_copy_time,
                 slow_reservation_listing_end,
-                "fast remote should upload before slow remote reservation listing finishes",
+                "upload stage must wait until every pre-upload preparation listing finishes",
             )
 
 

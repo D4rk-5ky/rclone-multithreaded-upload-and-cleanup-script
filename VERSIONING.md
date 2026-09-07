@@ -10,6 +10,53 @@ Rollover rule:
 
 `0.0.100` is not used.
 
+## 0.0.20
+
+Barriered stage execution and worker-failure isolation release.
+
+### Code
+
+- Incremented the application version from `0.0.19` to `0.0.20`.
+- Reworked PRE-UPLOAD orchestration into three explicit global stages: preparation, trash cleanup, and upload.
+- Added a barrier after all pre-upload cleanup/reservation workers so no remote can start pre-upload trash cleanup while another remote is still preparing.
+- Added a barrier after all eligible pre-upload trash-cleanup workers so no upload starts while another eligible trash-cleanup worker is still running or sleeping.
+- Kept worker failures isolated: one failed remote does not cancel other futures in the same stage.
+- Preserved prerequisite safety: a remote that fails preparation or pre-upload trash cleanup is skipped for upload, while other eligible remotes continue.
+- Preserved upload-failure isolation: a failed upload does not cancel sibling upload workers.
+- Split POST-UPLOAD cleanup and POST-UPLOAD trash cleanup into separate globally barriered stages.
+- Preserved the safety rule that post-upload trash cleanup is not run for a remote whose planned post-upload cleanup/delete stage failed.
+- Final verification still runs for all configured remotes after earlier failures.
+- `trash_cleanup_threads` is now used directly for both pre-upload and post-upload trash-cleanup worker pools.
+- `upload_threads` now limits only the upload stage; combined cleanup/quota stages use `max(cleanup_threads, remote_quota_cleanup_threads)`.
+- Preserved the three-snapshot planner, oldest-first whole-file selection, mixed trash/hard-delete grouping, exact reservation deficit, 1 MiB safety headroom, one-byte transfer-cap allowance, and `--cutoff-mode CAUTIOUS`.
+
+### Configuration and packaging
+
+- Kept the active JSON schema unchanged.
+- Updated `rclone-cctv-config.example.json` from the obsolete top-level `directory_cleanup_rules` layout to valid per-upload `cleanup_rules`.
+- Added currently supported per-upload fields such as `name` and `buffer_size` to the CCTV example so both packaged examples reflect the active schema.
+- Did not invent or recreate a production `config.json`: the uploaded v0.0.19 ZIP did not contain that file even though its old `SHA256SUMS`, tests, and verification report referred to it.
+- Replaced the broken production-config regression with a regression against the actually packaged `config.example.json`.
+- Rebuilt `SHA256SUMS` from the files actually present in the release archive.
+
+### Documentation
+
+- Rewrote `README.md` to document only current 0.0.20 behavior and usage, without old-version change history.
+- Documented the new global stage barriers, failure-isolation behavior, prerequisite skips, all CLI options, all config fields, delete modes, reservation behavior, and every rclone command the application can execute.
+- Rewrote `commented_code_map.md` against the current package and documented every top-level function/class plus the reason for each external command.
+
+### Tests and verification
+
+- Added a regression proving pre-upload trash cleanup waits for every preparation worker.
+- Added a regression proving upload waits for every eligible pre-upload trash-cleanup worker.
+- Added a regression proving one preparation failure does not prevent the other eligible remotes from uploading.
+- Added a regression proving one upload failure does not cancel the other upload workers.
+- Added a regression proving post-upload trash cleanup waits for every post-upload cleanup worker.
+- Added a regression proving one post-upload cleanup failure does not cancel the other remotes.
+- Updated the fake-rclone integration assertion so upload must start only after the slow remote finishes its PRE-UPLOAD listing.
+- The non-destructive suite now contains 14 tests and passes in the packaged environment.
+- Real destructive cloud-provider operations remain intentionally untested.
+
 ## 0.0.19
 
 Three-snapshot remote planner and request-reduction release.

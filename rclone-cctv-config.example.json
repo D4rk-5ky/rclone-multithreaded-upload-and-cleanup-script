@@ -9,30 +9,9 @@
     "remote_quota_cleanup_threads": 2,
     "trash_cleanup_threads": 2
   },
-  "directory_cleanup_rules": [
-    {
-      "path": "Home/Camera01",
-      "max_files": 80,
-      "max_size": null
-    },
-    {
-      "path": "Home/Camera02",
-      "max_files": null,
-      "max_size": "50G"
-    },
-    {
-      "path": "Garage/Camera03",
-      "max_files": 120,
-      "max_size": null
-    },
-    {
-      "path": "Outside/Camera04",
-      "max_files": 200,
-      "max_size": "100G"
-    }
-  ],
   "upload_directories": [
     {
+      "name": "Google Drive CCTV",
       "local_path": "/path/to/local/CCTV",
       "remote_path": "Example-GoogleDrive-Encrypted:/CCTV",
       "upload_command": "copy",
@@ -41,6 +20,41 @@
       "max_total_size": "500G",
       "delete_to_trash": false,
       "empty_trash": true,
+      "buffer_size": "64M",
+      "cleanup_rules": [
+        {
+          "path": "Home/Camera01",
+          "max_files": 80,
+          "max_size": null,
+          "delete_old_files": null,
+          "delete_excess_files": null,
+          "delete_to_trash": null
+        },
+        {
+          "path": "Home/Camera02",
+          "max_files": null,
+          "max_size": "50G",
+          "delete_old_files": null,
+          "delete_excess_files": null,
+          "delete_to_trash": null
+        },
+        {
+          "path": "Garage/Camera03",
+          "max_files": 120,
+          "max_size": null,
+          "delete_old_files": false,
+          "delete_excess_files": true,
+          "delete_to_trash": false
+        },
+        {
+          "path": "Outside/Camera04",
+          "max_files": 200,
+          "max_size": "100G",
+          "delete_old_files": null,
+          "delete_excess_files": null,
+          "delete_to_trash": null
+        }
+      ],
       "copy_options": [
         "--max-age",
         "3h",
@@ -54,6 +68,7 @@
       ]
     },
     {
+      "name": "MEGA CCTV",
       "local_path": "/path/to/local/CCTV",
       "remote_path": "Example-Mega-Encrypted:/CCTV",
       "upload_command": "copy",
@@ -61,7 +76,42 @@
       "delete_excess_files": true,
       "max_total_size": "250G",
       "delete_to_trash": true,
-      "empty_trash": false,
+      "empty_trash": true,
+      "buffer_size": "32M",
+      "cleanup_rules": [
+        {
+          "path": "Home/Camera01",
+          "max_files": 80,
+          "max_size": null,
+          "delete_old_files": null,
+          "delete_excess_files": null,
+          "delete_to_trash": null
+        },
+        {
+          "path": "Home/Camera02",
+          "max_files": null,
+          "max_size": "50G",
+          "delete_old_files": null,
+          "delete_excess_files": null,
+          "delete_to_trash": null
+        },
+        {
+          "path": "Garage/Camera03",
+          "max_files": 120,
+          "max_size": null,
+          "delete_old_files": false,
+          "delete_excess_files": true,
+          "delete_to_trash": false
+        },
+        {
+          "path": "Outside/Camera04",
+          "max_files": 200,
+          "max_size": "100G",
+          "delete_old_files": null,
+          "delete_excess_files": null,
+          "delete_to_trash": null
+        }
+      ],
       "copy_options": [
         "--max-age",
         "3h",
@@ -75,6 +125,7 @@
       ]
     },
     {
+      "name": "OneDrive CCTV",
       "local_path": "/path/to/local/CCTV",
       "remote_path": "Example-OneDrive-Encrypted:/CCTV",
       "upload_command": "sync",
@@ -83,6 +134,41 @@
       "max_total_size": "1T",
       "delete_to_trash": false,
       "empty_trash": false,
+      "buffer_size": null,
+      "cleanup_rules": [
+        {
+          "path": "Home/Camera01",
+          "max_files": 80,
+          "max_size": null,
+          "delete_old_files": null,
+          "delete_excess_files": null,
+          "delete_to_trash": null
+        },
+        {
+          "path": "Home/Camera02",
+          "max_files": null,
+          "max_size": "50G",
+          "delete_old_files": null,
+          "delete_excess_files": null,
+          "delete_to_trash": null
+        },
+        {
+          "path": "Garage/Camera03",
+          "max_files": 120,
+          "max_size": null,
+          "delete_old_files": false,
+          "delete_excess_files": true,
+          "delete_to_trash": false
+        },
+        {
+          "path": "Outside/Camera04",
+          "max_files": 200,
+          "max_size": "100G",
+          "delete_old_files": null,
+          "delete_excess_files": null,
+          "delete_to_trash": null
+        }
+      ],
       "copy_options": [
         "--max-age",
         "3h",

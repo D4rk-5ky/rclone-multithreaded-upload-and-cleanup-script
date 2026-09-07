@@ -1,4 +1,4 @@
-"""Non-destructive regression tests for the v0.0.19 snapshot planner."""
+"""Non-destructive regression tests for the snapshot planner and stage barriers."""
 
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
@@ -246,30 +246,84 @@ class LogicTests(unittest.TestCase):
             self.assertEqual(command[cap_index + 1], "1235B")
             self.assertEqual(command[cap_index + 2 : cap_index + 4], ["--cutoff-mode", "CAUTIOUS"])
 
-    def test_independent_remote_pipeline_has_no_global_snapshot_barrier(self):
+    def test_stage_barriers_wait_for_all_preparation_and_trash_jobs(self):
         from rclone_multithreaded_upload import phases
 
         fast = UploadDirectory("/tmp", "fast:root", [], [])
         slow = UploadDirectory("/tmp", "slow:root", [], [])
-        slow_snapshot_finished = threading.Event()
-        fast_upload_started_before_slow_finished = []
+        slow_preparation_finished = threading.Event()
+        slow_trash_finished = threading.Event()
+        fast_trash_saw_preparation_barrier = []
+        fast_upload_saw_trash_barrier = []
 
         def fake_snapshot(remote_path):
             if remote_path == "slow:root":
                 time.sleep(0.20)
-                slow_snapshot_finished.set()
+                slow_preparation_finished.set()
             return RemoteSnapshot(remote_path, {})
 
-        def fake_upload(job_number, upload):
+        def fake_trash(job_number, upload, phase_name=""):
+            del job_number, phase_name
             if upload.remote_path == "fast:root":
-                fast_upload_started_before_slow_finished.append(
-                    not slow_snapshot_finished.is_set()
+                fast_trash_saw_preparation_barrier.append(
+                    slow_preparation_finished.is_set()
                 )
+            if upload.remote_path == "slow:root":
+                time.sleep(0.20)
+                slow_trash_finished.set()
+            return True
+
+        def fake_upload(job_number, upload):
+            del job_number
+            if upload.remote_path == "fast:root":
+                fast_upload_saw_trash_barrier.append(slow_trash_finished.is_set())
             return True
 
         with StateSnapshot():
             STATE.upload_directories = [fast, slow]
             STATE.upload_threads = 2
+            STATE.cleanup_threads = 2
+            STATE.remote_quota_cleanup_threads = 2
+            STATE.trash_cleanup_threads = 2
+            STATE.sleep_after_step = 0
+            initialize_run_results()
+            with (
+                patch.object(phases, "fetch_remote_snapshot", side_effect=fake_snapshot),
+                patch.object(phases, "execute_delete_plan", return_value=True),
+                patch.object(phases, "cleanup_one_trash_remote", side_effect=fake_trash),
+                patch.object(phases, "upload_one_directory", side_effect=fake_upload),
+            ):
+                self.assertTrue(phases.run_reservation_and_upload_phase([]))
+
+        self.assertEqual(fast_trash_saw_preparation_barrier, [True])
+        self.assertEqual(fast_upload_saw_trash_barrier, [True])
+
+    def test_failed_preparation_does_not_cancel_other_uploads(self):
+        from rclone_multithreaded_upload import phases
+
+        uploads = [
+            UploadDirectory("/tmp", "good-a:root", [], []),
+            UploadDirectory("/tmp", "broken:root", [], []),
+            UploadDirectory("/tmp", "good-b:root", [], []),
+        ]
+        uploaded = []
+
+        def fake_snapshot(remote_path):
+            if remote_path == "broken:root":
+                raise RuntimeError("simulated remote listing failure")
+            return RemoteSnapshot(remote_path, {})
+
+        def fake_upload(job_number, upload):
+            del job_number
+            uploaded.append(upload.remote_path)
+            return True
+
+        with StateSnapshot():
+            STATE.upload_directories = uploads
+            STATE.upload_threads = 3
+            STATE.cleanup_threads = 3
+            STATE.remote_quota_cleanup_threads = 3
+            STATE.trash_cleanup_threads = 3
             STATE.sleep_after_step = 0
             initialize_run_results()
             with (
@@ -278,25 +332,140 @@ class LogicTests(unittest.TestCase):
                 patch.object(phases, "cleanup_one_trash_remote", return_value=True),
                 patch.object(phases, "upload_one_directory", side_effect=fake_upload),
             ):
-                self.assertTrue(phases.run_reservation_and_upload_phase([]))
+                self.assertFalse(phases.run_reservation_and_upload_phase([]))
 
-        self.assertEqual(fast_upload_started_before_slow_finished, [True])
+            self.assertEqual(set(uploaded), {"good-a:root", "good-b:root"})
+            self.assertEqual(STATE.run_results["broken:root"].reservation.status, "FAILED")
+            self.assertEqual(STATE.run_results["broken:root"].upload.status, "SKIPPED")
 
-    def test_production_config_loads_expected_runtime_state(self):
+    def test_upload_failure_does_not_cancel_other_upload_workers(self):
+        from rclone_multithreaded_upload import phases
+
+        uploads = [
+            UploadDirectory("/tmp", "good-a:root", [], []),
+            UploadDirectory("/tmp", "broken-upload:root", [], []),
+            UploadDirectory("/tmp", "good-b:root", [], []),
+        ]
+        upload_calls = []
+
+        def fake_upload(job_number, upload):
+            del job_number
+            upload_calls.append(upload.remote_path)
+            if upload.remote_path == "broken-upload:root":
+                from rclone_multithreaded_upload.results import record_stage_failure
+                record_stage_failure(upload.remote_path, "upload", "simulated upload failure")
+                return False
+            from rclone_multithreaded_upload.results import record_stage_success
+            record_stage_success(upload.remote_path, "upload")
+            return True
+
+        with StateSnapshot():
+            STATE.upload_directories = uploads
+            STATE.upload_threads = 3
+            STATE.cleanup_threads = 3
+            STATE.remote_quota_cleanup_threads = 3
+            STATE.trash_cleanup_threads = 3
+            STATE.sleep_after_step = 0
+            initialize_run_results()
+            with (
+                patch.object(phases, "fetch_remote_snapshot", side_effect=lambda remote: RemoteSnapshot(remote, {})),
+                patch.object(phases, "execute_delete_plan", return_value=True),
+                patch.object(phases, "cleanup_one_trash_remote", return_value=True),
+                patch.object(phases, "upload_one_directory", side_effect=fake_upload),
+            ):
+                self.assertFalse(phases.run_reservation_and_upload_phase([]))
+
+            self.assertEqual(set(upload_calls), {upload.remote_path for upload in uploads})
+            self.assertEqual(STATE.run_results["good-a:root"].upload.status, "SUCCESS")
+            self.assertEqual(STATE.run_results["broken-upload:root"].upload.status, "FAILED")
+            self.assertEqual(STATE.run_results["good-b:root"].upload.status, "SUCCESS")
+
+    def test_post_cleanup_barrier_waits_before_trash_cleanup(self):
+        from rclone_multithreaded_upload import phases
+
+        fast = UploadDirectory("/tmp", "fast:root", [], [])
+        slow = UploadDirectory("/tmp", "slow:root", [], [])
+        slow_cleanup_finished = threading.Event()
+        fast_trash_saw_cleanup_barrier = []
+
+        def fake_snapshot(remote_path):
+            if remote_path == "slow:root":
+                time.sleep(0.20)
+                slow_cleanup_finished.set()
+            return RemoteSnapshot(remote_path, {})
+
+        def fake_trash(job_number, upload, phase_name=""):
+            del job_number, phase_name
+            if upload.remote_path == "fast:root":
+                fast_trash_saw_cleanup_barrier.append(slow_cleanup_finished.is_set())
+            return True
+
+        with StateSnapshot():
+            STATE.upload_directories = [fast, slow]
+            STATE.cleanup_threads = 2
+            STATE.remote_quota_cleanup_threads = 2
+            STATE.trash_cleanup_threads = 2
+            initialize_run_results()
+            with (
+                patch.object(phases, "fetch_remote_snapshot", side_effect=fake_snapshot),
+                patch.object(phases, "execute_delete_plan", return_value=True),
+                patch.object(phases, "cleanup_one_trash_remote", side_effect=fake_trash),
+            ):
+                self.assertTrue(phases.run_post_upload_cleanup_phase([]))
+
+        self.assertEqual(fast_trash_saw_cleanup_barrier, [True])
+
+    def test_post_cleanup_failure_does_not_cancel_other_remotes(self):
+        from rclone_multithreaded_upload import phases
+
+        uploads = [
+            UploadDirectory("/tmp", "good-a:root", [], []),
+            UploadDirectory("/tmp", "broken:root", [], []),
+            UploadDirectory("/tmp", "good-b:root", [], []),
+        ]
+        trash_calls = []
+
+        def fake_snapshot(remote_path):
+            if remote_path == "broken:root":
+                raise RuntimeError("simulated post-cleanup snapshot failure")
+            return RemoteSnapshot(remote_path, {})
+
+        def fake_trash(job_number, upload, phase_name=""):
+            del job_number, phase_name
+            trash_calls.append(upload.remote_path)
+            return True
+
+        with StateSnapshot():
+            STATE.upload_directories = uploads
+            STATE.cleanup_threads = 3
+            STATE.remote_quota_cleanup_threads = 3
+            STATE.trash_cleanup_threads = 3
+            initialize_run_results()
+            with (
+                patch.object(phases, "fetch_remote_snapshot", side_effect=fake_snapshot),
+                patch.object(phases, "execute_delete_plan", return_value=True),
+                patch.object(phases, "cleanup_one_trash_remote", side_effect=fake_trash),
+            ):
+                self.assertFalse(phases.run_post_upload_cleanup_phase([]))
+
+            self.assertEqual(set(trash_calls), {"good-a:root", "good-b:root"})
+            self.assertEqual(STATE.run_results["broken:root"].post_cleanup.status, "FAILED")
+
+    def test_packaged_example_config_loads_expected_runtime_state(self):
         project_root = Path(__file__).resolve().parents[1]
         with StateSnapshot():
-            load_config(str(project_root / "config.json"))
-            self.assertEqual(STATE.upload_threads, 4)
-            self.assertEqual(STATE.cleanup_threads, 4)
-            self.assertEqual(STATE.remote_quota_cleanup_threads, 4)
-            self.assertEqual(STATE.trash_cleanup_threads, 4)
+            load_config(str(project_root / "config.example.json"))
+            self.assertEqual(STATE.upload_threads, 2)
+            self.assertEqual(STATE.cleanup_threads, 2)
+            self.assertEqual(STATE.remote_quota_cleanup_threads, 2)
+            self.assertEqual(STATE.trash_cleanup_threads, 2)
             self.assertEqual(
                 [upload.name for upload in STATE.upload_directories],
-                ["GDrive", "Mega", "OneDrive"],
+                ["Primary archive", "Mirror archive", "Move completed exports"],
             )
             self.assertEqual(
                 [upload.max_total_size for upload in STATE.upload_directories],
-                ["12G", "12G", "50G"],
+                ["500G", "250G", None],
             )
 
 

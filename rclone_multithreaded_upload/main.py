@@ -56,9 +56,9 @@ def main() -> int:
         print_error("Final cleanup/quota verification failed")
     if not upload_success:
         print_error(
-            "One or more pre-clean/reservation/upload pipelines failed. Post-upload "
-            "cleanup and final verification were still run because a failed upload may "
-            "have transferred partial data."
+            "One or more pre-upload preparation, trash-cleanup, or upload jobs failed. "
+            "Other independent remote jobs continued, and post-upload cleanup/final "
+            "verification were still run because an upload may have transferred partial data."
         )
 
     overall_success = all(
@@ -68,7 +68,7 @@ def main() -> int:
 
     if overall_success:
         print_step(
-            "Pre-clean, reservation, upload, post-upload cleanup, and final verification successful"
+            "Pre-upload preparation, trash cleanup, upload, post-upload cleanup, and final verification successful"
         )
 
     if not overall_success:
