@@ -12,7 +12,11 @@ from .planning import (
     cleanup_targets_for_upload,
 )
 from .remote_files import fetch_remote_snapshot
-from .reservation import clear_local_size_cache, get_filtered_local_upload_size
+from .reservation import (
+    clear_local_size_cache,
+    get_filtered_local_upload_snapshot,
+    select_local_upload_files,
+)
 from .results import (
     finalize_stage_for_all,
     record_stage_failure,
@@ -21,7 +25,7 @@ from .results import (
 )
 from .state import STATE
 from .upload import upload_one_directory
-from .utils import format_bytes
+from .utils import format_bytes, parse_size_to_bytes
 from .verification import verify_upload_snapshot
 
 
@@ -71,22 +75,41 @@ def prepare_one_remote_for_upload(
 
     local_upload_bytes = 0
     local_file_count = 0
+    selected_upload_bytes = 0
+    selected_upload_files = ()
+    max_upload_bytes = 0
     quota_reservation_enabled = (
         upload.delete_excess_files and upload.max_total_size is not None
     )
     if quota_reservation_enabled:
-        local_size_result = get_filtered_local_upload_size(job_number, upload)
-        if local_size_result is None:
+        local_snapshot = get_filtered_local_upload_snapshot(job_number, upload)
+        if local_snapshot is None:
             record_stage_skipped(upload.remote_path, "upload")
             return False
-        local_upload_bytes, local_file_count = local_size_result
+        local_upload_bytes = local_snapshot.total_bytes
+        local_file_count = local_snapshot.file_count
+        max_total_size_bytes = parse_size_to_bytes(upload.max_total_size)
+        max_upload_bytes = max_total_size_bytes - STATE.reservation_safety_headroom_bytes
+        if max_upload_bytes < 0:
+            detail = (
+                "Pre-upload cleanup/reservation planning failed: reservation safety "
+                "headroom is larger than max_total_size"
+            )
+            record_stage_failure(upload.remote_path, "reservation", detail)
+            record_stage_skipped(upload.remote_path, "upload")
+            print_job_block("PRE-UPLOAD PREPARATION", job_number, upload.remote_path, detail)
+            return False
+        selected_upload_files, selected_upload_bytes = select_local_upload_files(
+            local_snapshot,
+            max_upload_bytes,
+        )
 
     try:
         plan, _working_snapshot, reservation = build_pre_upload_plan(
             upload,
             targets,
             pre_snapshot,
-            local_upload_bytes,
+            selected_upload_bytes,
         )
     except Exception as error:
         detail = f"Pre-upload cleanup/reservation planning failed: {error}"
@@ -100,22 +123,34 @@ def prepare_one_remote_for_upload(
         return False
 
     if quota_reservation_enabled:
+        selected_file_count = len(selected_upload_files)
+        skipped_file_count = local_file_count - selected_file_count
+        skipped_bytes = local_upload_bytes - selected_upload_bytes
         with STATE.reserved_upload_bytes_lock:
-            STATE.reserved_upload_bytes[upload.remote_path] = local_upload_bytes
+            STATE.reserved_upload_bytes[upload.remote_path] = selected_upload_bytes
+            STATE.planned_upload_files[upload.remote_path] = tuple(
+                file.path for file in selected_upload_files
+            )
         print_job_block(
             "UPLOAD RESERVATION JOB",
             job_number,
             upload.remote_path,
             (
-                "Pre-upload size reservation planned from the pre-upload snapshot.\n"
-                f"Filtered local files    : {local_file_count}\n"
-                f"Managed size before plan: {format_bytes(reservation['current_size'])}\n"
-                f"Filtered local size     : {format_bytes(local_upload_bytes)}\n"
-                f"Reserved upload cap     : {format_bytes(reservation['reserved_upload_bytes'])}\n"
-                f"Calculated deficit      : {format_bytes(reservation['required_free_bytes'])}\n"
-                f"Selected complete files : {format_bytes(reservation['selected_free_bytes'])}\n"
-                f"Projected temporary size: {format_bytes(reservation['projected_temporary_size'])}\n"
-                f"Max total size          : {format_bytes(reservation['max_total_size_bytes'])}"
+                "Pre-upload complete-file reservation planned from the frozen local/remote snapshots.\n"
+                f"Filtered local files     : {local_file_count}\n"
+                f"Filtered local size      : {format_bytes(local_upload_bytes)}\n"
+                f"Upload byte budget       : {format_bytes(max_upload_bytes)}\n"
+                f"Selected upload files    : {selected_file_count}\n"
+                f"Selected upload size     : {format_bytes(selected_upload_bytes)}\n"
+                "Selection policy         : newest-first; stop at first file that does not fit\n"
+                f"Quota cutoff reached     : {'Yes' if skipped_file_count else 'No'}\n"
+                f"Files after cutoff       : {skipped_file_count}\n"
+                f"Bytes after cutoff       : {format_bytes(skipped_bytes)}\n"
+                f"Managed size before plan : {format_bytes(reservation['current_size'])}\n"
+                f"Calculated deficit       : {format_bytes(reservation['required_free_bytes'])}\n"
+                f"Remote bytes selected    : {format_bytes(reservation['selected_free_bytes'])}\n"
+                f"Projected temporary size : {format_bytes(reservation['projected_temporary_size'])}\n"
+                f"Max total size           : {format_bytes(reservation['max_total_size_bytes'])}"
             ),
         )
 
@@ -160,6 +195,9 @@ def run_reservation_and_upload_phase(
 ) -> bool:
     """Run PREPARE -> TRASH CLEANUP -> UPLOAD with global barriers and per-remote failure isolation."""
     clear_local_size_cache()
+    with STATE.reserved_upload_bytes_lock:
+        STATE.reserved_upload_bytes.clear()
+        STATE.planned_upload_files.clear()
     failed = False
 
     preparation_workers = max(STATE.cleanup_threads, STATE.remote_quota_cleanup_threads)

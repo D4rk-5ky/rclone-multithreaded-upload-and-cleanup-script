@@ -33,7 +33,7 @@ Always test with disposable data or a test remote first, run `--validate-config`
 
 # rclone-multithreaded-upload
 
-Version 0.0.22
+Version 0.0.25
 
 `rclone-multithreaded-upload` uploads one or more local directories to independent rclone destinations while enforcing configured age, file-count, folder-size, and managed remote-size limits.
 
@@ -47,7 +47,7 @@ The application is deliberately stage-based. Threads inside a stage run independ
    - recursive remote snapshot
    - age cleanup planning
    - cleanup_rules max_files/max_size planning
-   - filtered local source sizing when max_total_size reservation is enabled
+   - filtered exact local source snapshotting and whole-file cap selection when max_total_size reservation is enabled
    - max_total_size upload-reservation planning
    - execute the combined planned delete list
 
@@ -137,27 +137,30 @@ When both of these are true for an upload destination:
 "max_total_size": "500G"
 ```
 
-the application measures the filtered local upload source with `rclone size --json`.
+the application takes one exact filtered local file snapshot with `rclone lsjson`. The snapshot records each candidate path, size, and modification time.
 
-The reservation calculation is:
+The upload budget is:
+
+```text
+max_total_size - 1 MiB safety headroom
+```
+
+If the filtered source is larger than that budget, complete files are considered newest-first by rclone `ModTime`. Selection is a contiguous newest-first prefix: files are included only while each next complete file fully fits in the remaining byte budget. As soon as the first next file would exceed the remaining budget, the quota cutoff is considered reached and selection stops immediately. The application does **not** scan farther into older files looking for smaller files that might fit. All files at and after the cutoff wait for a later run.
+
+The remote-space reservation calculation is then:
 
 ```text
 managed remote bytes after planned pre-cleanup
-+ measured local upload bytes + 1 byte transfer allowance
++ selected complete local upload bytes
 + 1 MiB safety headroom
 - max_total_size
 ```
 
-If space must be freed, the oldest complete managed remote files are selected until at least that byte deficit is covered.
+If space must be freed, the oldest complete managed remote files are selected until at least that byte deficit is covered. The selected local paths are frozen for the upload stage and written to a NUL-separated generated list passed with `--files-from0`. This prevents files created after reservation from silently exceeding the reserved amount. If the newest file itself cannot fit within the upload budget, the selected set is empty; the upload stage is recorded as successfully having nothing eligible to transfer and no rclone upload command or upload-stage backend lookup is started before the pipeline continues.
 
-The upload also receives:
+`--max-transfer` and `--cutoff-mode CAUTIOUS` are not used for quota-managed uploads. Hitting rclone's transfer ceiling returns a non-zero result, so transfer limits are not used as a successful file-selection mechanism.
 
-```text
---max-transfer <measured-local-bytes + 1 byte>
---cutoff-mode CAUTIOUS
-```
-
-Identical local source/filter combinations share one concurrent size calculation during the run.
+Identical local source/filter combinations share one concurrent local `lsjson` snapshot during the run.
 
 ## Requirements
 
@@ -242,12 +245,99 @@ Start from `config.example.json` or the CCTV-oriented `rclone-cctv-config.exampl
 
 | Option | Required | Meaning |
 | --- | --- | --- |
+| `script_name` | No | Friendly name for this configured job/run. It is printed in the startup summary and included as `script_name` in the MQTT result payload. Default `rclone-multithreaded-upload`. |
+| `mqtt` | No | Optional object controlling one final JSON MQTT result publication after a completed normal run. MQTT is disabled by default. |
 | `delete_min_age` | No | Rclone-style age/duration used by cleanup rules that have `delete_old_files=true`. Default runtime value is `31d`. The value is fully parsed during config loading/`--validate-config`; invalid durations or timestamps are rejected before execution. |
 | `lock_file` | No | Single-instance lock-file path. |
-| `delete_list_dir` | No | Directory used for generated `--files-from` delete lists. |
+| `delete_list_dir` | No | Directory used for generated delete lists and quota-managed `--files-from0` upload lists. |
 | `sleep_after_step` | No | Seconds each eligible remote waits after pre-upload trash cleanup before the upload barrier can complete. Non-negative integer. |
 | `thread_limits` | No | Object containing the four worker limits below. |
 | `upload_directories` | Yes | Non-empty list of upload destinations. |
+
+### `mqtt`
+
+MQTT publishing is optional and disabled unless `mqtt.enabled=true`. When enabled, the application publishes exactly one JSON result after the normal run reaches its final result. The MQTT transport is notification-only: a broker or publish failure is printed as an error but does **not** change the rclone/cleanup run's exit status.
+
+Install the optional dependency only on systems that enable MQTT:
+
+```bash
+python3 -m pip install -r requirements-mqtt.txt
+```
+
+Example:
+
+```json
+"script_name": "Frigate CCTV Upload",
+"mqtt": {
+  "enabled": true,
+  "host": "192.168.10.10",
+  "port": 1883,
+  "topic": "homeassistant/rclone-upload/result",
+  "username": "rclone",
+  "password": "replace-with-your-mqtt-password",
+  "client_id": null,
+  "qos": 1,
+  "retain": false,
+  "keepalive": 60,
+  "tls": false,
+  "tls_insecure": false,
+  "ca_certs": null,
+  "publish_timeout": 10
+}
+```
+
+| Option | Required when enabled | Meaning |
+| --- | --- | --- |
+| `enabled` | No | Enables final-result publishing. Default `false`. |
+| `host` | Yes | MQTT broker hostname or IP address. |
+| `port` | No | Broker TCP port, `1..65535`. Default `1883`. |
+| `topic` | No | Topic receiving the JSON result. Must be a concrete publish topic without `+` or `#` wildcards. Default `rclone-multithreaded-upload/result`. |
+| `username` | No | MQTT username. If `password` is set, `username` is required. |
+| `password` | No | MQTT password. It is never printed in the startup summary. Protect the config file appropriately because this value is stored as plain configuration text. |
+| `client_id` | No | MQTT client ID. `null` lets the client library choose/derive an ID. |
+| `qos` | No | MQTT QoS `0`, `1`, or `2`. Default `1`. |
+| `retain` | No | Whether the result message is retained by the broker. Default `false` so Home Assistant does not receive an old run result merely because it reconnects/restarts. |
+| `keepalive` | No | MQTT keepalive seconds. Default `60`. |
+| `tls` | No | Enable TLS. Default `false`. |
+| `tls_insecure` | No | Disable TLS hostname/certificate verification. Requires `tls=true`; default `false`. Use only when you understand the security tradeoff. |
+| `ca_certs` | No | Optional CA certificate file passed to paho-mqtt. Requires `tls=true`. |
+| `publish_timeout` | No | Seconds to wait for broker connection/publication completion, `1..3600`. Default `10`. |
+
+The result payload is intentionally stable and easy for Home Assistant to consume. A successful run looks like:
+
+```json
+{
+  "schema_version": 1,
+  "event": "rclone_multithreaded_upload_result",
+  "script_name": "Frigate CCTV Upload",
+  "application": "rclone-multithreaded-upload",
+  "application_version": "0.0.25",
+  "timestamp": "2026-09-11T08:45:00Z",
+  "status": "success",
+  "success": true,
+  "exit_code": 0,
+  "error": null,
+  "failed_remotes": [],
+  "remotes": [
+    {
+      "name": "GDrive",
+      "remote_path": "Example-GDrive-Encrypted:Frigate",
+      "status": "success",
+      "stages": {
+        "reservation": "SUCCESS",
+        "upload": "SUCCESS",
+        "post_cleanup": "SUCCESS",
+        "final_quota": "SUCCESS"
+      },
+      "errors": []
+    }
+  ]
+}
+```
+
+On failure, `status` becomes `"failure"`, `success` becomes `false`, `exit_code` is non-zero, `failed_remotes` contains the friendly per-destination names, and `error` contains the captured stage error text. Each failed remote also has structured `errors` entries containing `stage` and `error`.
+
+The packaged `home-assistant-mqtt-automation.example.yaml` subscribes to `homeassistant/rclone-upload/result`, branches on `trigger.payload_json.status`, and sends both Pushover and persistent notifications. Replace its `notify.pushover` action with the exact Pushover notify entity/action configured in your Home Assistant instance.
 
 ### `thread_limits`
 
@@ -313,11 +403,11 @@ Examples: `1K`, `64MB`, `500G`, `1TB`. The units use binary multipliers (1024, 1
 
 `max_total_size` only covers files included by that destination's `cleanup_rules`. If `cleanup_rules` is empty, the managed union is empty and `max_total_size` has no managed files to count.
 
-## `copy_options` and local-size filters
+## `copy_options` and local-source filters
 
 The upload command receives `copy_options` as configured.
 
-When reservation sizing is required, only source-selection options that affect which local files are included are forwarded to `rclone size --json`:
+When quota reservation is required, only source-selection options that affect which local files are included are forwarded to the local `rclone lsjson` snapshot:
 
 ```text
 --min-age
@@ -328,10 +418,13 @@ When reservation sizing is required, only source-selection options that affect w
 --include-from
 --exclude
 --exclude-from
+--exclude-if-present
 --filter
 --filter-from
 --files-from
 --files-from-raw
+--files-from0
+--hash-filter
 --ignore-case
 ```
 
@@ -356,7 +449,7 @@ The application rejects these script-managed flags inside `copy_options`:
 -n
 ```
 
-Use the dedicated config options for the behavior the application manages itself.
+Use the dedicated config options for the behavior the application manages itself. In addition, quota-managed `sync` rejects `--delete-excluded` because files skipped by the byte budget are intentionally excluded and must not be deleted from the destination.
 
 ## Delete modes
 
@@ -405,13 +498,13 @@ rclone lsjson --recursive --files-only --no-mimetype REMOTE:
 
 Used for PRE-UPLOAD planning, POST-UPLOAD cleanup planning, and FINAL verification.
 
-### Local reservation sizing
+### Local quota-managed upload snapshot
 
 ```bash
-rclone size LOCAL_PATH --json [source-selection filters]
+rclone lsjson LOCAL_PATH --recursive --files-only --no-mimetype [source-selection filters]
 ```
 
-Used only when `delete_excess_files=true` and `max_total_size` is configured for that upload destination.
+Used only when `delete_excess_files=true` and `max_total_size` is configured for that upload destination. The exact file list is reused for candidate sizing, newest-first whole-file cap selection, reservation, and the generated upload list.
 
 ### Planned deletion
 
@@ -439,13 +532,17 @@ rclone sync LOCAL_PATH REMOTE: [options]
 rclone move LOCAL_PATH REMOTE: [options]
 ```
 
-`sync` can delete destination files that are absent from the selected source according to normal rclone sync semantics. Review the rclone options and test carefully before using it against important data.
+For quota-managed uploads, source-selection filters are first applied to the frozen local snapshot, then replaced on the transfer command by the exact generated `--files-from0` list. Non-filter options such as stats and transfer concurrency remain in place.
+
+`sync` can delete destination files that are absent from the selected source according to normal rclone sync semantics. For quota-managed `sync`, `--delete-excluded` is rejected during config validation because over-budget files are intentionally excluded from the generated list and must not be deleted from the destination merely because they were skipped for that run.
 
 ## Generated files and lock behavior
 
 The configured lock file prevents two normal instances from running at once. The file contains the process PID and is removed on normal process exit through the registered cleanup handler, and also on handled SIGINT/SIGTERM.
 
-Combined delete plans are written below `delete_list_dir` with names derived from the phase, delete mode, and a readable remote-name fragment plus the full SHA-256 of the original `remote_path`. The hash prevents legacy filename collisions such as `a:b/c` versus `a_b:c`. The generated lists are then passed to `rclone delete --files-from`.
+Combined delete plans are written below `delete_list_dir` with names derived from the phase, delete mode, and a readable remote-name fragment plus the full SHA-256 of the original `remote_path`. The hash prevents legacy filename collisions such as `a:b/c` versus `a_b:c`. The generated delete lists are passed to `rclone delete --files-from`.
+
+Quota-managed upload selections also use `delete_list_dir` for a collision-resistant `to-upload-...files0` file. It is NUL-separated and passed to rclone with `--files-from0`, so paths containing whitespace, `#`, or `;` are not misparsed as line-oriented filter syntax.
 
 ## Final result output
 
@@ -462,6 +559,14 @@ Final quota
 
 A stage can be `SUCCESS`, `FAILED`, or `SKIPPED`. Captured failure details are printed under the affected remote. The overall result is `SUCCESS` only when every required stage is successful.
 
+## MQTT final result and Home Assistant
+
+MQTT publication happens only after a normal run has completed reservation/upload, post-upload cleanup, final verification, and final result aggregation. `--validate-config` never publishes MQTT messages.
+
+Home Assistant's MQTT trigger exposes parsed JSON as `trigger.payload_json`, so the included automation can branch directly on `status == 'success'` or `status == 'failure'`. The success message includes `script_name`; the failure message includes `script_name`, `failed_remotes`, and the combined `error` text.
+
+Because `retain=false` is the default, each automation trigger represents a newly published run result rather than a retained historical result delivered when Home Assistant reconnects.
+
 ## Project files
 
 ```text
@@ -476,6 +581,7 @@ rclone_multithreaded_upload/
     lock.py
     main.py
     models.py
+    mqtt.py
     output.py
     phases.py
     planning.py
@@ -494,6 +600,8 @@ tests/
     test_integration_fake_rclone.py
 config.example.json
 rclone-cctv-config.example.json
+home-assistant-mqtt-automation.example.yaml
+requirements-mqtt.txt
 README.md
 VERSIONING.md
 commented_code_map.md

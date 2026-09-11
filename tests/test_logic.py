@@ -16,21 +16,36 @@ from rclone_multithreaded_upload.config import load_config
 from rclone_multithreaded_upload.delete_plan import execute_delete_plan
 from rclone_multithreaded_upload.models import (
     CleanupTarget,
+    MqttConfig,
     DirectoryCleanupRule,
     RemoteDeletePlan,
     RemoteFile,
+    LocalUploadFile,
+    LocalUploadSnapshot,
     PlannedDeletion,
     RemoteSnapshot,
     UploadDirectory,
+)
+from rclone_multithreaded_upload.mqtt import (
+    _create_mqtt_client,
+    build_result_payload,
+    publish_final_result,
+    publish_result_payload,
 )
 from rclone_multithreaded_upload.planning import build_pre_upload_plan
 from rclone_multithreaded_upload.remote_files import get_managed_snapshot_files
 from rclone_multithreaded_upload.reservation import (
     clear_local_size_cache,
     get_filtered_local_upload_size,
+    get_filtered_local_upload_snapshot,
     get_size_filter_options,
+    select_local_upload_files,
 )
-from rclone_multithreaded_upload.results import initialize_run_results
+from rclone_multithreaded_upload.results import (
+    initialize_run_results,
+    record_stage_failure,
+    record_stage_success,
+)
 from rclone_multithreaded_upload.state import STATE
 from rclone_multithreaded_upload.utils import (
     parse_duration_to_timedelta,
@@ -42,6 +57,8 @@ from rclone_multithreaded_upload.utils import (
 class StateSnapshot:
     def __enter__(self):
         self.values = {
+            "script_name": STATE.script_name,
+            "mqtt": STATE.mqtt,
             "upload_directories": STATE.upload_directories,
             "config_path": STATE.config_path,
             "delete_min_age": STATE.delete_min_age,
@@ -55,6 +72,7 @@ class StateSnapshot:
             "reservation_safety_headroom_bytes": STATE.reservation_safety_headroom_bytes,
             "lock_created": STATE.lock_created,
             "reserved_upload_bytes": dict(STATE.reserved_upload_bytes),
+            "planned_upload_files": dict(STATE.planned_upload_files),
             "run_results": dict(STATE.run_results),
         }
         return self
@@ -186,6 +204,289 @@ class ConfigValidationTests(unittest.TestCase):
         self.assertNotIn("Config validation successful", result.stdout)
 
 
+    def test_quota_managed_sync_rejects_delete_excluded(self):
+        upload = self.minimal_upload()
+        upload.update(
+            {
+                "upload_command": "sync",
+                "delete_excess_files": True,
+                "max_total_size": "12G",
+                "copy_options": ["--delete-excluded"],
+            }
+        )
+        result = self.run_validate_config({"upload_directories": [upload]})
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("must not contain --delete-excluded", result.stdout)
+        self.assertIn("quota-managed sync", result.stdout)
+
+
+    def test_script_name_and_mqtt_settings_validate_and_hide_password(self):
+        result = self.run_validate_config(
+            {
+                "script_name": "Frigate CCTV Upload",
+                "mqtt": {
+                    "enabled": True,
+                    "host": "192.0.2.10",
+                    "port": 1883,
+                    "topic": "homeassistant/rclone-upload/result",
+                    "username": "rclone",
+                    "password": "super-secret",
+                    "qos": 1,
+                    "retain": False,
+                },
+                "upload_directories": [self.minimal_upload()],
+            }
+        )
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("Script name: Frigate CCTV Upload", result.stdout)
+        self.assertIn("Enabled                 : True", result.stdout)
+        self.assertIn("homeassistant/rclone-upload/result", result.stdout)
+        self.assertIn("Username configured     : True", result.stdout)
+        self.assertNotIn("super-secret", result.stdout)
+
+    def test_mqtt_enabled_requires_host(self):
+        result = self.run_validate_config(
+            {
+                "mqtt": {"enabled": True},
+                "upload_directories": [self.minimal_upload()],
+            }
+        )
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("mqtt.host is required when mqtt.enabled=true", result.stdout)
+
+    def test_mqtt_qos_is_validated(self):
+        result = self.run_validate_config(
+            {
+                "mqtt": {"enabled": True, "host": "broker", "qos": 3},
+                "upload_directories": [self.minimal_upload()],
+            }
+        )
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("mqtt.qos must be an integer between 0 and 2", result.stdout)
+
+    def test_script_name_and_publish_topic_reject_null_or_wildcards(self):
+        null_name = self.run_validate_config(
+            {
+                "script_name": None,
+                "upload_directories": [self.minimal_upload()],
+            }
+        )
+        self.assertEqual(null_name.returncode, 1, null_name.stdout)
+        self.assertIn("root.script_name must be a non-empty string", null_name.stdout)
+
+        null_topic = self.run_validate_config(
+            {
+                "mqtt": {"enabled": True, "host": "broker", "topic": None},
+                "upload_directories": [self.minimal_upload()],
+            }
+        )
+        self.assertEqual(null_topic.returncode, 1, null_topic.stdout)
+        self.assertIn("mqtt.topic must be a non-empty string", null_topic.stdout)
+
+        wildcard_topic = self.run_validate_config(
+            {
+                "mqtt": {
+                    "enabled": True,
+                    "host": "broker",
+                    "topic": "homeassistant/rclone/#",
+                },
+                "upload_directories": [self.minimal_upload()],
+            }
+        )
+        self.assertEqual(wildcard_topic.returncode, 1, wildcard_topic.stdout)
+        self.assertIn("without + or # wildcards", wildcard_topic.stdout)
+
+
+class MqttResultTests(unittest.TestCase):
+    @staticmethod
+    def _one_upload():
+        return UploadDirectory(
+            local_path="/tmp",
+            remote_path="remote:root",
+            copy_options=[],
+            cleanup_rules=[],
+            name="GDrive",
+        )
+
+    def _initialize_results(self):
+        STATE.upload_directories = [self._one_upload()]
+        initialize_run_results()
+
+    def test_success_payload_is_home_assistant_friendly(self):
+        with StateSnapshot():
+            STATE.script_name = "Frigate CCTV Upload"
+            self._initialize_results()
+            for stage in ("reservation", "upload", "post_cleanup", "final_quota"):
+                record_stage_success("remote:root", stage)
+
+            payload = build_result_payload(0)
+
+            self.assertEqual(payload["schema_version"], 1)
+            self.assertEqual(payload["script_name"], "Frigate CCTV Upload")
+            self.assertEqual(payload["status"], "success")
+            self.assertTrue(payload["success"])
+            self.assertEqual(payload["exit_code"], 0)
+            self.assertIsNone(payload["error"])
+            self.assertEqual(payload["failed_remotes"], [])
+            self.assertEqual(payload["remotes"][0]["name"], "GDrive")
+            self.assertEqual(payload["remotes"][0]["status"], "success")
+            self.assertEqual(payload["remotes"][0]["stages"]["upload"], "SUCCESS")
+
+    def test_failure_payload_includes_remote_and_error_text(self):
+        with StateSnapshot():
+            STATE.script_name = "Frigate CCTV Upload"
+            self._initialize_results()
+            record_stage_success("remote:root", "reservation")
+            record_stage_failure(
+                "remote:root",
+                "upload",
+                "Return code: 8\nmax transfer limit reached",
+            )
+            record_stage_success("remote:root", "post_cleanup")
+            record_stage_success("remote:root", "final_quota")
+
+            payload = build_result_payload(1)
+
+            self.assertEqual(payload["status"], "failure")
+            self.assertFalse(payload["success"])
+            self.assertEqual(payload["failed_remotes"], ["GDrive"])
+            self.assertIn("GDrive - upload", payload["error"])
+            self.assertIn("Return code: 8", payload["error"])
+            self.assertEqual(payload["remotes"][0]["status"], "failed")
+            self.assertEqual(payload["remotes"][0]["errors"][0]["stage"], "upload")
+
+    def test_disabled_mqtt_does_not_load_optional_dependency(self):
+        with StateSnapshot():
+            STATE.mqtt = MqttConfig(enabled=False)
+            with patch("rclone_multithreaded_upload.mqtt._load_paho_mqtt") as loader:
+                self.assertIsNone(publish_final_result(0))
+                loader.assert_not_called()
+
+    def test_paho_v2_client_uses_callback_api_version_2(self):
+        class FakeCallbackApiVersion:
+            VERSION2 = object()
+
+        class FakeMqtt:
+            CallbackAPIVersion = FakeCallbackApiVersion
+
+            def __init__(self):
+                self.args = None
+                self.kwargs = None
+                self.client = object()
+
+            def Client(self, *args, **kwargs):
+                self.args = args
+                self.kwargs = kwargs
+                return self.client
+
+        fake_mqtt = FakeMqtt()
+        client = _create_mqtt_client(fake_mqtt, "rclone-test")
+        self.assertIs(client, fake_mqtt.client)
+        self.assertEqual(fake_mqtt.args, (FakeCallbackApiVersion.VERSION2,))
+        self.assertEqual(fake_mqtt.kwargs, {"client_id": "rclone-test"})
+
+    def test_publish_uses_configured_topic_qos_retain_and_credentials(self):
+        class FakePublishInfo:
+            rc = 0
+
+            def __init__(self):
+                self.wait_timeout = None
+                self.published = False
+
+            def wait_for_publish(self, timeout=None):
+                self.wait_timeout = timeout
+                self.published = True
+
+            def is_published(self):
+                return self.published
+
+        class FakeClient:
+            def __init__(self):
+                self.calls = []
+                self.info = FakePublishInfo()
+
+            def username_pw_set(self, username, password):
+                self.calls.append(("auth", username, password))
+
+            def connect(self, host, port, keepalive):
+                self.calls.append(("connect", host, port, keepalive))
+                return 0
+
+            def loop_start(self):
+                self.calls.append(("loop_start",))
+                return 0
+
+            def is_connected(self):
+                return True
+
+            def publish(self, topic, payload, qos, retain):
+                self.calls.append(("publish", topic, payload, qos, retain))
+                return self.info
+
+            def disconnect(self):
+                self.calls.append(("disconnect",))
+
+            def loop_stop(self):
+                self.calls.append(("loop_stop",))
+
+        class FakeMqtt:
+            MQTT_ERR_SUCCESS = 0
+
+            def __init__(self, client):
+                self.client = client
+                self.client_ids = []
+
+            def Client(self, client_id=""):
+                self.client_ids.append(client_id)
+                return self.client
+
+        with StateSnapshot():
+            STATE.mqtt = MqttConfig(
+                enabled=True,
+                host="mqtt.local",
+                port=1884,
+                topic="homeassistant/rclone-upload/result",
+                username="rclone",
+                password="secret",
+                client_id="rclone-test",
+                qos=2,
+                retain=True,
+                keepalive=45,
+                publish_timeout=7,
+            )
+            client = FakeClient()
+            fake_mqtt = FakeMqtt(client)
+            with patch(
+                "rclone_multithreaded_upload.mqtt._load_paho_mqtt",
+                return_value=fake_mqtt,
+            ):
+                publish_result_payload({"status": "success", "script_name": "Test"})
+
+            self.assertEqual(fake_mqtt.client_ids, ["rclone-test"])
+            self.assertIn(("auth", "rclone", "secret"), client.calls)
+            self.assertIn(("connect", "mqtt.local", 1884, 45), client.calls)
+            publish_call = next(call for call in client.calls if call[0] == "publish")
+            self.assertEqual(publish_call[1], "homeassistant/rclone-upload/result")
+            self.assertEqual(json.loads(publish_call[2])["status"], "success")
+            self.assertEqual(publish_call[3:], (2, True))
+            self.assertEqual(client.info.wait_timeout, 7)
+
+    def test_publish_failure_is_reported_but_does_not_raise(self):
+        with StateSnapshot():
+            STATE.script_name = "Frigate CCTV Upload"
+            STATE.mqtt = MqttConfig(enabled=True, host="mqtt.local")
+            self._initialize_results()
+            for stage in ("reservation", "upload", "post_cleanup", "final_quota"):
+                record_stage_success("remote:root", stage)
+
+            with patch(
+                "rclone_multithreaded_upload.mqtt._load_paho_mqtt",
+                side_effect=RuntimeError("paho missing"),
+            ):
+                self.assertFalse(publish_final_result(0))
+
+
+
 class LogicTests(unittest.TestCase):
     def test_parse_size_and_duration_helpers(self):
         expected_sizes = {
@@ -293,7 +594,7 @@ class LogicTests(unittest.TestCase):
             ) as fake_datetime:
                 fake_datetime.now.return_value = datetime(2026, 7, 7, tzinfo=timezone.utc)
                 plan, working, reservation = build_pre_upload_plan(
-                    upload, [target], snapshot, local_upload_bytes=500 * 1024
+                    upload, [target], snapshot, selected_upload_bytes=500 * 1024
                 )
 
         self.assertEqual(
@@ -302,9 +603,9 @@ class LogicTests(unittest.TestCase):
         )
         self.assertEqual(set(working.files_by_path), {"new"})
         self.assertEqual(reservation["current_size"], 600 * 1024)
-        self.assertEqual(reservation["required_free_bytes"], 110 * 1024 + 1)
+        self.assertEqual(reservation["required_free_bytes"], 110 * 1024)
         self.assertEqual(reservation["selected_free_bytes"], 300 * 1024)
-        self.assertEqual(reservation["projected_temporary_size"], 800 * 1024 + 1)
+        self.assertEqual(reservation["projected_temporary_size"], 800 * 1024)
 
     def test_local_size_single_flight_scans_identical_source_once(self):
         with StateSnapshot(), tempfile.TemporaryDirectory() as temp_dir:
@@ -321,11 +622,19 @@ class LogicTests(unittest.TestCase):
             def fake_calculate(upload):
                 calls.append(upload.remote_path)
                 time.sleep(0.10)
-                return 123, 4
+                files = tuple(
+                    LocalUploadFile(
+                        f"file-{index}.bin",
+                        size,
+                        f"2026-07-01T00:00:0{index}Z",
+                    )
+                    for index, size in enumerate((30, 30, 30, 33), start=1)
+                )
+                return LocalUploadSnapshot(files, 123)
 
             clear_local_size_cache()
             with patch(
-                "rclone_multithreaded_upload.reservation._calculate_filtered_local_upload_size",
+                "rclone_multithreaded_upload.reservation._calculate_filtered_local_upload_snapshot",
                 side_effect=fake_calculate,
             ):
                 with ThreadPoolExecutor(max_workers=3) as executor:
@@ -509,22 +818,32 @@ class LogicTests(unittest.TestCase):
                 )
             cleanup_run.assert_called_once()
 
-    def test_upload_command_keeps_buffer_filters_and_reserved_transfer_cap(self):
+    def test_quota_managed_upload_uses_exact_file_list_without_max_transfer(self):
         from rclone_multithreaded_upload import upload as upload_module
 
         with StateSnapshot(), tempfile.TemporaryDirectory() as temp_dir:
-            source = Path(temp_dir)
-            remote_path = "remote:root"
+            source = Path(temp_dir) / "source"
+            source.mkdir()
+            remote_path = "Encrypted-Remote:root"
             upload = UploadDirectory(
                 local_path=str(source),
                 remote_path=remote_path,
-                copy_options=["--max-age", "12h", "--transfers", "4"],
+                copy_options=[
+                    "--max-age", "12h",
+                    "--exclude", "/old/**",
+                    "--stats", "10s",
+                    "--transfers", "4",
+                ],
                 cleanup_rules=[DirectoryCleanupRule(path="/")],
                 buffer_size="64M",
                 max_total_size="12G",
             )
             STATE.upload_directories = [upload]
+            STATE.delete_list_dir = Path(temp_dir) / "lists"
             STATE.reserved_upload_bytes = {remote_path: 1234}
+            STATE.planned_upload_files = {
+                remote_path: ("recordings/newest.mp4", "clips/event.webp")
+            }
             initialize_run_results()
             captured = []
 
@@ -538,9 +857,132 @@ class LogicTests(unittest.TestCase):
             command = captured[0][0]
             self.assertEqual(command[:4], ["rclone", "copy", str(source), remote_path])
             self.assertIn("--buffer-size", command)
-            cap_index = command.index("--max-transfer")
-            self.assertEqual(command[cap_index + 1], "1235B")
-            self.assertEqual(command[cap_index + 2 : cap_index + 4], ["--cutoff-mode", "CAUTIOUS"])
+            self.assertIn("--stats", command)
+            self.assertIn("--transfers", command)
+            self.assertNotIn("--max-transfer", command)
+            self.assertNotIn("--cutoff-mode", command)
+            self.assertNotIn("--max-age", command)
+            self.assertNotIn("--exclude", command)
+            list_index = command.index("--files-from0")
+            list_path = Path(command[list_index + 1])
+            self.assertEqual(
+                list_path.read_bytes(),
+                b"recordings/newest.mp4\0clips/event.webp\0",
+            )
+
+    def test_complete_file_selection_below_equal_and_above_budget(self):
+        files = (
+            LocalUploadFile("old.bin", 400, "2026-09-11T01:00:00Z"),
+            LocalUploadFile("middle.bin", 400, "2026-09-11T02:00:00Z"),
+            LocalUploadFile("new.bin", 400, "2026-09-11T03:00:00Z"),
+        )
+        snapshot = LocalUploadSnapshot(files, 1200)
+
+        selected, size = select_local_upload_files(snapshot, 1600)
+        self.assertEqual(size, 1200)
+        self.assertEqual([file.path for file in selected], ["new.bin", "middle.bin", "old.bin"])
+
+        selected, size = select_local_upload_files(snapshot, 1200)
+        self.assertEqual(size, 1200)
+        self.assertEqual(len(selected), 3)
+
+        selected, size = select_local_upload_files(snapshot, 800)
+        self.assertEqual(size, 800)
+        self.assertEqual([file.path for file in selected], ["new.bin", "middle.bin"])
+
+        exact_then_zero = LocalUploadSnapshot(
+            (
+                LocalUploadFile("new.bin", 800, "2026-09-11T03:00:00Z"),
+                LocalUploadFile("older-zero.bin", 0, "2026-09-11T02:00:00Z"),
+            ),
+            800,
+        )
+        selected, size = select_local_upload_files(exact_then_zero, 800)
+        self.assertEqual(size, 800)
+        self.assertEqual([file.path for file in selected], ["new.bin"])
+
+    def test_complete_file_selection_stops_at_first_non_fitting_file(self):
+        snapshot = LocalUploadSnapshot(
+            (
+                LocalUploadFile("new.bin", 600, "2026-09-11T04:00:00Z"),
+                LocalUploadFile("next-too-large.bin", 300, "2026-09-11T03:00:00Z"),
+                LocalUploadFile("older-small.bin", 100, "2026-09-11T02:00:00Z"),
+                LocalUploadFile("oldest-small.bin", 50, "2026-09-11T01:00:00Z"),
+            ),
+            1050,
+        )
+        selected, size = select_local_upload_files(snapshot, 800)
+        self.assertEqual(size, 600)
+        self.assertEqual([file.path for file in selected], ["new.bin"])
+
+    def test_complete_file_selection_stops_immediately_if_newest_file_does_not_fit(self):
+        snapshot = LocalUploadSnapshot(
+            (
+                LocalUploadFile("new-too-large.bin", 900, "2026-09-11T03:00:00Z"),
+                LocalUploadFile("middle-small.bin", 600, "2026-09-11T02:00:00Z"),
+                LocalUploadFile("old-small.bin", 300, "2026-09-11T01:00:00Z"),
+            ),
+            1800,
+        )
+        selected, size = select_local_upload_files(snapshot, 800)
+        self.assertEqual(size, 0)
+        self.assertEqual(selected, ())
+
+    def test_empty_quota_selection_is_successful_noop_without_rclone(self):
+        from rclone_multithreaded_upload import upload as upload_module
+
+        with StateSnapshot(), tempfile.TemporaryDirectory() as temp_dir:
+            source = Path(temp_dir) / "source"
+            source.mkdir()
+            remote_path = "Encrypted-Remote:root"
+            upload = UploadDirectory(
+                str(source),
+                remote_path,
+                ["--max-age", "12h"],
+                [DirectoryCleanupRule(path="/")],
+                max_total_size="12G",
+                upload_command="sync",
+                delete_to_trash=False,
+            )
+            STATE.upload_directories = [upload]
+            STATE.delete_list_dir = Path(temp_dir) / "lists"
+            STATE.planned_upload_files = {remote_path: ()}
+            initialize_run_results()
+            with (
+                patch.object(upload_module, "run_command_streamed") as run_streamed,
+                patch.object(upload_module, "get_delete_mode_options") as delete_options,
+            ):
+                self.assertTrue(upload_module.upload_one_directory(1, upload))
+            run_streamed.assert_not_called()
+            delete_options.assert_not_called()
+            self.assertEqual(STATE.run_results[remote_path].upload.status, "SUCCESS")
+            self.assertFalse(STATE.run_results[remote_path].upload_trash_mode_attempted)
+
+    def test_planned_partial_upload_error_is_still_failure_not_success(self):
+        from rclone_multithreaded_upload import upload as upload_module
+
+        with StateSnapshot(), tempfile.TemporaryDirectory() as temp_dir:
+            source = Path(temp_dir) / "source"
+            source.mkdir()
+            remote_path = "Encrypted-Remote:root"
+            upload = UploadDirectory(
+                str(source),
+                remote_path,
+                ["--max-age", "12h"],
+                [DirectoryCleanupRule(path="/")],
+                max_total_size="12G",
+            )
+            STATE.upload_directories = [upload]
+            STATE.delete_list_dir = Path(temp_dir) / "lists"
+            STATE.planned_upload_files = {remote_path: ("one.mp4",)}
+            initialize_run_results()
+            with patch.object(
+                upload_module,
+                "run_command_streamed",
+                return_value=(8, "simulated partial transfer failure"),
+            ):
+                self.assertFalse(upload_module.upload_one_directory(1, upload))
+            self.assertEqual(STATE.run_results[remote_path].upload.status, "FAILED")
 
     def test_stage_barriers_wait_for_all_preparation_and_trash_jobs(self):
         from rclone_multithreaded_upload import phases
@@ -751,6 +1193,9 @@ class LogicTests(unittest.TestCase):
         project_root = Path(__file__).resolve().parents[1]
         with StateSnapshot():
             load_config(str(project_root / "config.example.json"))
+            self.assertEqual(STATE.script_name, "Camera archive upload")
+            self.assertFalse(STATE.mqtt.enabled)
+            self.assertEqual(STATE.mqtt.topic, "homeassistant/rclone-upload/result")
             self.assertEqual(STATE.upload_threads, 2)
             self.assertEqual(STATE.cleanup_threads, 2)
             self.assertEqual(STATE.remote_quota_cleanup_threads, 2)

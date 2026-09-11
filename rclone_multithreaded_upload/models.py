@@ -4,6 +4,26 @@ from dataclasses import dataclass, field
 
 
 @dataclass
+class MqttConfig:
+    """Optional MQTT result-publishing configuration."""
+
+    enabled: bool = False
+    host: str | None = None
+    port: int = 1883
+    topic: str = "rclone-multithreaded-upload/result"
+    username: str | None = None
+    password: str | None = None
+    client_id: str | None = None
+    qos: int = 1
+    retain: bool = False
+    keepalive: int = 60
+    tls: bool = False
+    tls_insecure: bool = False
+    ca_certs: str | None = None
+    publish_timeout: int = 10
+
+
+@dataclass
 class DirectoryCleanupRule:
     """One cleanup rule owned by one UploadDirectory."""
 
@@ -44,6 +64,27 @@ class CleanupTarget:
     delete_excess_files: bool = True
     delete_to_trash: bool = False
     owner_remote_path: str = ""
+
+
+@dataclass(frozen=True)
+class LocalUploadFile:
+    """One filtered local source file returned by rclone lsjson."""
+
+    path: str
+    size: int
+    modified: str
+
+
+@dataclass(frozen=True)
+class LocalUploadSnapshot:
+    """Exact filtered local candidate set used for reservation and upload."""
+
+    files: tuple[LocalUploadFile, ...]
+    total_bytes: int
+
+    @property
+    def file_count(self) -> int:
+        return len(self.files)
 
 
 @dataclass(frozen=True)

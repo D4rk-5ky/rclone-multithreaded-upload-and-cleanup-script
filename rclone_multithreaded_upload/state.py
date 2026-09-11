@@ -9,11 +9,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 import threading
 
-from .models import RemoteRunResult, UploadDirectory
+from .models import MqttConfig, RemoteRunResult, UploadDirectory
 
 
 @dataclass
 class RuntimeState:
+    script_name: str = "rclone-multithreaded-upload"
+    mqtt: MqttConfig = field(default_factory=MqttConfig)
     upload_directories: list[UploadDirectory] = field(default_factory=list)
     config_path: Path | None = None
     delete_min_age: str = "31d"
@@ -27,6 +29,7 @@ class RuntimeState:
     reservation_safety_headroom_bytes: int = 1 * 1024**2
     lock_created: bool = False
     reserved_upload_bytes: dict[str, int] = field(default_factory=dict)
+    planned_upload_files: dict[str, tuple[str, ...]] = field(default_factory=dict)
     reserved_upload_bytes_lock: threading.Lock = field(
         default_factory=threading.Lock,
         repr=False,

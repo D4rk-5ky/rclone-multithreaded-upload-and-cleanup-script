@@ -10,6 +10,99 @@ Rollover rule:
 
 `0.0.100` is not used.
 
+## 0.0.25
+
+Named-run and optional MQTT result notification release.
+
+### Code
+
+- Incremented the application version from `0.0.24` to `0.0.25`.
+- Added root `script_name` configuration with default `rclone-multithreaded-upload`; the configured name is shown in the startup summary and included in the final MQTT JSON payload.
+- Added optional `mqtt` configuration and a dedicated `mqtt.py` module. MQTT remains disabled by default and does not import the optional paho-mqtt dependency unless publishing is enabled.
+- Added stable schema-versioned final JSON payloads containing overall `status`/`success`, process exit code, UTC timestamp, script name, application version, friendly failed-remote names, per-remote stage states, structured per-stage errors, and a combined top-level failure `error` string suitable for Home Assistant templates.
+- Added MQTT broker authentication, QoS 0/1/2, retain control, client ID, keepalive, TLS, optional CA file, TLS-insecure override, publish timeout configuration validation, and publish-topic validation that rejects MQTT wildcards.
+- MQTT result publication runs only after a normal execution has reached final result aggregation. `--validate-config` does not publish.
+- MQTT transport errors are logged but deliberately do not rewrite the backup/upload/cleanup result or process exit code; notification transport is observational rather than a destructive/runtime prerequisite.
+- Startup summaries expose MQTT connection settings without ever printing the configured password.
+- Preserved all v0.0.24 quota selection, strict newest-first cutoff, hard-delete/trash distinctions, cleanup barriers, partial-upload handling, and final verification behavior.
+
+### Home Assistant and configuration
+
+- Added MQTT examples to both packaged JSON configs. Existing configs remain compatible because `script_name` is optional and MQTT defaults to disabled.
+- Added `requirements-mqtt.txt` containing the optional `paho-mqtt` dependency.
+- Added `home-assistant-mqtt-automation.example.yaml`, which subscribes to the example topic, branches on `trigger.payload_json.status`, sends Pushover on success/failure, and also creates a persistent Home Assistant notification. Failure notifications include the script name, failed remote names, and captured error text.
+- Default/example result messages are non-retained so reconnecting Home Assistant does not replay a historical result as though it were a new run.
+
+### Tests and verification
+
+- Added config-validation coverage for `script_name`, null/new-field handling, enabled MQTT without a host, QoS range validation, publish-topic wildcard rejection, and startup-summary password secrecy.
+- Added payload coverage for both successful and failed runs, including captured remote/stage error text.
+- Added coverage proving disabled MQTT does not attempt to import paho-mqtt.
+- Added publish-path coverage for configured broker, credentials, topic, QoS, retain, keepalive, client ID, timeout, and Paho 2.x callback API client construction.
+- Added coverage proving MQTT transport failure is reported without raising into the completed backup result.
+- Full automated suite for v0.0.25: 41 tests.
+
+## 0.0.24
+
+Strict newest-first quota cutoff release.
+
+### Code
+
+- Incremented the application version from `0.0.23` to `0.0.24`.
+- Changed quota-managed local file selection from gap-filling to a strict contiguous newest-first prefix.
+- Selection now stops immediately when the first next complete file would exceed the remaining upload budget. That file and every older file are deferred to a later run; the selector never scans farther for a smaller older file.
+- Preserved complete-file transfers, the frozen generated `--files-from0` upload set, reservation safety headroom, oldest-first remote cleanup, and the removal of runtime `--max-transfer` / `--cutoff-mode`.
+- If the newest file itself does not fit, quota planning selects zero files and the upload stage succeeds as a no-op without invoking rclone. This also avoids unsafe empty-list `sync` behavior. The pipeline then continues through post-upload cleanup and final verification normally.
+- Added explicit reservation output showing the selection policy, whether the quota cutoff was reached, and how many files/bytes remain at and after the cutoff.
+- Preserved all hard-delete versus trash-mode distinctions and trash-cleanup activity tracking.
+
+### Documentation and configuration
+
+- Updated `README.md` and `commented_code_map.md` to document the strict stop-at-first-non-fitting-file policy and zero-selection no-op behavior.
+- No config option was added or removed. Existing v0.0.23 configuration remains compatible.
+
+### Tests and verification
+
+- Replaced the former gap-filling test with strict cutoff coverage proving smaller older files are not selected after the first non-fitting file.
+- Added coverage proving selection stops immediately with an empty set when the newest file itself does not fit.
+- Added coverage proving an empty quota selection is a successful no-op and does not start rclone.
+- Updated the end-to-end fake-rclone capped-upload regression to prove only the contiguous newest-first prefix is uploaded and older smaller files after the cutoff remain deferred.
+
+## 0.0.23
+
+Quota-managed complete-file upload selection release.
+
+### Code
+
+- Incremented the application version from `0.0.22` to `0.0.23`.
+- Removed the runtime `--max-transfer` / `--cutoff-mode CAUTIOUS` upload cap that caused successful partial transfers to terminate with rclone exit code `8` when the configured transfer ceiling was reached.
+- Replaced aggregate-only quota sizing with one exact filtered local `rclone lsjson` snapshot containing path, size, and `ModTime` for every candidate file. Identical local source/filter combinations still use one concurrent single-flight scan per run.
+- Quota-managed uploads now calculate an upload byte budget of `max_total_size - reservation_safety_headroom_bytes`.
+- When the filtered candidate set exceeds that budget, complete files are selected newest-first by `ModTime`; a file is included only when it fully fits in the remaining budget. Oversized files are skipped and smaller later files may still fill remaining capacity.
+- The remote reservation planner now reserves exactly the selected complete-file bytes plus safety headroom and frees oldest managed remote files only when needed to cover that selected set.
+- The exact selected local paths are frozen between PRE-UPLOAD planning and the later UPLOAD barrier so newly-created source files cannot silently exceed the already-planned reservation.
+- Quota-managed upload commands now use a generated NUL-separated `--files-from0` list. Source-selection filters are removed from the final transfer command because rclone ignores ordinary filters when `--files-from*` is active; non-filter options such as stats and transfer concurrency remain unchanged.
+- Generated upload-list names reuse the collision-resistant `remote_name_from_path()` helper and are written below the configured `delete_list_dir`.
+- Preserved normal non-zero upload error handling: partial-transfer failures remain failures and are not reclassified as success.
+- Preserved all hard-delete versus trash-mode behavior, trash-cleanup activity tracking, stage barriers, sibling-worker failure isolation, post-upload cleanup after failed uploads, and final quota verification.
+- Added a safety validation rejecting `--delete-excluded` for quota-managed `sync`, because over-budget paths are deliberately excluded from the generated upload set and must not be deleted from the destination merely because they were skipped for that run.
+
+### Documentation and configuration
+
+- Updated `README.md` to document exact local source snapshots, newest-first complete-file selection, generated `--files-from0` uploads, the removal of transfer ceilings, and quota-managed sync safety.
+- Updated `commented_code_map.md` for the new local snapshot models, reservation helpers, upload-list writer, state tracking, planning behavior, and external rclone command map.
+- No config option was added or removed. Existing `max_total_size`, cleanup rules, delete modes, filters, and thread settings remain compatible.
+
+### Tests and verification
+
+- Expanded the automated suite from 24 tests in v0.0.22 to 29 tests.
+- Added explicit below-limit, exactly-at-limit, and above-limit complete-file selection coverage.
+- Added newest-first selection coverage, including the case where an oversized newer file is skipped while a smaller older complete file still fits.
+- Added encrypted-remote command construction coverage proving quota-managed uploads use `--files-from0` and do not emit `--max-transfer` or `--cutoff-mode`.
+- Added partial/error handling coverage proving rclone exit code `8` remains an upload failure rather than being treated as a capped-upload success.
+- Added config-validation coverage for unsafe quota-managed `sync --delete-excluded`.
+- Added an end-to-end fake-rclone capped-upload regression proving the real application entry point uploads only the newest complete files that fit the budget and succeeds without a transfer ceiling.
+
 ## 0.0.22
 
 Delete-mode safety, collision-resistant delete lists, and strict config validation release.

@@ -62,6 +62,22 @@ if args[:2] == ["config", "dump"]:
     sys.exit(0)
 
 if args and args[0] == "lsjson":
+    possible_local = Path(args[1]) if len(args) > 1 else Path("/__missing__")
+    if possible_local.is_dir():
+        local_path = possible_local
+        entries = []
+        for path in local_path.rglob("*"):
+            if path.is_file():
+                entries.append({
+                    "Path": path.relative_to(local_path).as_posix(),
+                    "Size": path.stat().st_size,
+                    "ModTime": datetime.fromtimestamp(path.stat().st_mtime, timezone.utc).isoformat(),
+                    "IsDir": False,
+                })
+        log("local-lsjson", str(local_path))
+        print(json.dumps(entries))
+        sys.exit(0)
+
     remote = args[-1]
     log("lsjson-start", remote)
     if remote.startswith("slow:"):
@@ -73,18 +89,6 @@ if args and args[0] == "lsjson":
         for item in entries
     ]))
     log("lsjson-end", remote)
-    sys.exit(0)
-
-if args and args[0] == "size":
-    local_path = Path(args[1])
-    total = 0
-    count = 0
-    for path in local_path.rglob("*"):
-        if path.is_file():
-            total += path.stat().st_size
-            count += 1
-    log("size", str(local_path))
-    print(json.dumps({"bytes": total, "count": count}))
     sys.exit(0)
 
 if args and args[0] == "delete":
@@ -115,19 +119,29 @@ if args and args[0] == "cleanup":
 if args and args[0] in {"copy", "sync", "move"}:
     command, local_text, remote = args[:3]
     local_path = Path(local_text)
+    selected_paths = None
+    if "--files-from0" in args:
+        index = args.index("--files-from0")
+        raw = Path(args[index + 1]).read_bytes()
+        selected_paths = {
+            item.decode("utf-8") for item in raw.split(b"\0") if item
+        }
     now = datetime.now(timezone.utc).isoformat()
     uploaded = []
     for path in local_path.rglob("*"):
         if path.is_file():
+            relative = path.relative_to(local_path).as_posix()
+            if selected_paths is not None and relative not in selected_paths:
+                continue
             uploaded.append({
-                "path": path.relative_to(local_path).as_posix(),
+                "path": relative,
                 "size": path.stat().st_size,
                 "modified": now,
             })
 
     def mutate(state):
         existing = {item["path"]: item for item in state["remotes"].get(remote, [])}
-        if command == "sync":
+        if command == "sync" and selected_paths is None:
             existing = {}
         for item in uploaded:
             existing[item["path"]] = item
@@ -136,9 +150,8 @@ if args and args[0] in {"copy", "sync", "move"}:
     with_state(mutate)
     log(command, remote)
     if command == "move":
-        for path in local_path.rglob("*"):
-            if path.is_file():
-                path.unlink()
+        for item in uploaded:
+            (local_path / item["path"]).unlink()
     print("Transferred: fake integration upload")
     sys.exit(0)
 
@@ -298,9 +311,9 @@ class FakeRcloneIntegrationTests(unittest.TestCase):
             }
             self.assertEqual(lsjson_counts, {"fast:root": 3, "slow:root": 3})
             self.assertEqual(
-                sum(1 for item in records if item["event"] == "size"),
+                sum(1 for item in records if item["event"] == "local-lsjson"),
                 1,
-                "identical local source/filter combinations should be sized once",
+                "identical local source/filter combinations should share one exact source snapshot",
             )
             self.assertFalse(any(item["event"] == "delete-age" for item in records))
 
@@ -319,6 +332,118 @@ class FakeRcloneIntegrationTests(unittest.TestCase):
                 slow_reservation_listing_end,
                 "upload stage must wait until every pre-upload preparation listing finishes",
             )
+
+    def test_over_budget_upload_stops_at_first_non_fitting_file_without_transfer_cap(self):
+        project_root = Path(__file__).resolve().parents[1]
+
+        with tempfile.TemporaryDirectory() as temp_text:
+            temp = Path(temp_text)
+            fake_bin = temp / "bin"
+            fake_bin.mkdir()
+            fake_rclone = fake_bin / "rclone"
+            fake_rclone.write_text(FAKE_RCLONE, encoding="utf-8")
+            fake_rclone.chmod(0o755)
+
+            local = temp / "local"
+            local.mkdir()
+            sizes = {
+                "old-small.mp4": 100 * 1024,
+                "middle-too-large.mp4": 1300 * 1024,
+                "new.mp4": 1200 * 1024,
+            }
+            mtimes = {
+                "old-small.mp4": 1_780_000_000,
+                "middle-too-large.mp4": 1_780_000_100,
+                "new.mp4": 1_780_000_200,
+            }
+            for name, size in sizes.items():
+                path = local / name
+                path.write_bytes(b"X" * size)
+                os.utime(path, (mtimes[name], mtimes[name]))
+
+            state_path = temp / "state.json"
+            state_path.write_text(
+                json.dumps({"remotes": {"Encrypted:Frigate": []}}),
+                encoding="utf-8",
+            )
+            log_path = temp / "rclone.log"
+            log_path.write_text("", encoding="utf-8")
+
+            config_path = temp / "config.json"
+            config_path.write_text(
+                json.dumps(
+                    {
+                        "delete_min_age": "31d",
+                        "lock_file": str(temp / "app.lock"),
+                        "delete_list_dir": str(temp / "lists"),
+                        "sleep_after_step": 0,
+                        "thread_limits": {
+                            "upload_threads": 1,
+                            "cleanup_threads": 1,
+                            "remote_quota_cleanup_threads": 1,
+                            "trash_cleanup_threads": 1,
+                        },
+                        "upload_directories": [
+                            {
+                                "name": "Encrypted",
+                                "local_path": str(local),
+                                "remote_path": "Encrypted:Frigate",
+                                "upload_command": "copy",
+                                "delete_old_files": False,
+                                "delete_excess_files": True,
+                                "max_total_size": "3M",
+                                "delete_to_trash": True,
+                                "empty_trash": False,
+                                "cleanup_rules": [{"path": "/", "max_size": "3M"}],
+                                "copy_options": ["--stats", "10s"],
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            env = os.environ.copy()
+            env["PATH"] = f"{fake_bin}:{env['PATH']}"
+            env["FAKE_RCLONE_STATE"] = str(state_path)
+            env["FAKE_RCLONE_LOG"] = str(log_path)
+            env["PYTHONPATH"] = str(project_root)
+
+            result = subprocess.run(
+                [
+                    str(project_root / "rclone-multithreaded-upload.py"),
+                    "--config",
+                    str(config_path),
+                ],
+                cwd=project_root,
+                env=env,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                timeout=20,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout)
+            self.assertIn(
+                "Selection policy         : newest-first; stop at first file that does not fit",
+                result.stdout,
+            )
+            self.assertIn("Quota cutoff reached     : Yes", result.stdout)
+            self.assertIn("Files after cutoff       : 2", result.stdout)
+
+            final_state = json.loads(state_path.read_text(encoding="utf-8"))
+            remote_paths = {item["path"] for item in final_state["remotes"]["Encrypted:Frigate"]}
+            self.assertEqual(remote_paths, {"new.mp4"})
+
+            records = [
+                json.loads(line)
+                for line in log_path.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            copy_record = next(item for item in records if item["event"] == "copy")
+            self.assertIn("--files-from0", copy_record["args"])
+            self.assertNotIn("--max-transfer", copy_record["args"])
+            self.assertNotIn("--cutoff-mode", copy_record["args"])
+
 
 
 if __name__ == "__main__":

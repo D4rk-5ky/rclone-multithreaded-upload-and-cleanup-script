@@ -30,6 +30,12 @@ Single application version source. CLI `--version` imports this value so the dis
 
 ## `models.py`
 
+### `MqttConfig`
+
+Stores the optional broker, topic, authentication, QoS, retain, keepalive, TLS, CA, client-ID, and publish-timeout settings for one final result message.
+
+Why: MQTT notification settings stay typed and separate from destructive rclone/cleanup configuration, and disabled MQTT carries no runtime dependency.
+
 ### `DirectoryCleanupRule`
 
 Represents one relative cleanup rule inside one upload destination.
@@ -47,6 +53,24 @@ Why: every upload destination is handled as an independent unit for result track
 Resolved full remote cleanup path generated from an `UploadDirectory` plus a relative `DirectoryCleanupRule`.
 
 Why: planning functions can work with explicit full targets while config stays readable with relative paths.
+
+### `LocalUploadFile`
+
+Immutable representation of one filtered local candidate returned by local `rclone lsjson`: path, size, and modification time.
+
+Why: quota-managed uploads need exact complete-file identities, not only an aggregate byte count.
+
+### `LocalUploadSnapshot`
+
+Immutable tuple of filtered `LocalUploadFile` entries plus the aggregate candidate bytes. `file_count` is derived from the tuple.
+
+Why: one local scan can drive sizing, newest-first cap selection, reservation, and the final exact upload list.
+
+### `LocalUploadSnapshot.file_count`
+
+Read-only property returning the number of candidate files in the snapshot.
+
+Why: callers can report candidate count without storing a second mutable count that could diverge from the exact file tuple.
 
 ### `RemoteFile`
 
@@ -98,6 +122,8 @@ Holds config-loaded runtime values and concurrency-safe shared dictionaries/lock
 
 Important fields include:
 
+- `script_name`
+- `mqtt`
 - `upload_directories`
 - `delete_min_age`
 - `upload_threads`
@@ -109,6 +135,7 @@ Important fields include:
 - `sleep_after_step`
 - `reservation_safety_headroom_bytes`
 - `reserved_upload_bytes`
+- `planned_upload_files`
 - `run_results`
 
 Why: imported modules all see the same live state after config loading instead of copying stale scalar values.
@@ -186,6 +213,12 @@ Reads a non-negative integer.
 
 Why: used for sleeps/thread values before the separate minimum-thread checks.
 
+### `optional_int_in_range(section_name, config, key, default, minimum, maximum)`
+
+Reads a strict integer inside an inclusive range.
+
+Why: MQTT port, QoS, keepalive, and publication timeout each have explicit valid numeric ranges and boolean values must not be accepted as integers.
+
 ### `optional_positive_int_or_none(section_name, config, key)`
 
 Reads a positive integer or `null`.
@@ -198,6 +231,12 @@ Reads a list containing only strings.
 
 Why: rclone option arrays must remain tokenized safely without shell parsing.
 
+### `parse_mqtt_config(config)`
+
+Builds a fresh `MqttConfig`, validates enabled-broker requirements, numeric ranges, username/password dependency, and TLS option consistency.
+
+Why: malformed notification settings fail during normal config loading/`--validate-config` before the script starts destructive or network transfer work.
+
 ### `parse_cleanup_rules(section_name, raw_upload)`
 
 Parses each upload-owned cleanup rule, normalizes its path, rejects duplicate normalized paths, validates optional size limits, and preserves nullable overrides.
@@ -208,13 +247,13 @@ Why: cleanup ownership and inheritance are resolved deterministically.
 
 Builds every `UploadDirectory`, validates upload command, sizes, buffer size, booleans, cleanup rules, and extra rclone options. It tracks exact destination strings while parsing and rejects a repeated `remote_path` with an explicit safety warning before runtime state can collapse two destinations into one key.
 
-It rejects script-managed flags inside `copy_options`, including `--max-transfer`, `--cutoff-mode`, and `--buffer-size`.
+It rejects application-reserved flags inside `copy_options`, including `--max-transfer`, `--cutoff-mode`, and `--buffer-size`. It also rejects `--delete-excluded` specifically for quota-managed `sync`, because over-budget files are intentionally absent from the generated exact upload list.
 
-Why: users cannot accidentally override the reservation safety cap or dedicated runtime settings, and destructive workers cannot be launched concurrently for an identical destination.
+Why: users cannot accidentally recreate the transfer-limit failure, override dedicated runtime settings, delete intentionally skipped sync paths, or launch destructive workers concurrently for an identical destination.
 
 ### `load_config(config_path_text)`
 
-Loads the complete config into `STATE`, validates thread limits, paths, and legacy schema rejection. It also fully parses `delete_min_age` before assigning runtime state, so `--validate-config` catches invalid age/duration values instead of deferring the error until cleanup planning.
+Loads the complete config into `STATE`, including root `script_name` and a freshly parsed optional `mqtt` configuration, and validates thread limits, paths, and legacy schema rejection. It also fully parses `delete_min_age` before assigning runtime state, so `--validate-config` catches invalid age/duration values instead of deferring the error until cleanup planning.
 
 It rejects obsolete top-level `directory_cleanup_rules`.
 
@@ -398,15 +437,15 @@ Applies upload-level `max_total_size` after rule cleanup by selecting oldest man
 
 Why: final quota enforcement should use the already-cleaned simulated state.
 
-### `plan_upload_reservation(upload, snapshot, plan, local_upload_bytes)`
+### `plan_upload_reservation(upload, snapshot, plan, selected_upload_bytes)`
 
-Calculates temporary-space reservation using managed bytes, filtered local size, one-byte transfer allowance, and 1 MiB safety headroom. Selects oldest complete files until the exact calculated deficit is covered.
+Calculates temporary-space reservation from the bytes of the already-selected complete local files plus the 1 MiB safety headroom. It selects oldest complete managed remote files until the exact calculated deficit is covered. There is no one-byte transfer allowance and no rclone transfer cap.
 
-Why: the upload should not intentionally exceed the configured managed total while transferring the selected local source.
+Why: file selection now happens explicitly before reservation, so reservation needs only the byte total of the frozen selected set.
 
-### `build_pre_upload_plan(upload, targets, snapshot, local_upload_bytes)`
+### `build_pre_upload_plan(upload, targets, snapshot, selected_upload_bytes)`
 
-Clones the PRE-UPLOAD snapshot, runs cleanup-rule planning, then reservation planning, returning one combined plan plus reservation statistics.
+Clones the PRE-UPLOAD snapshot, runs cleanup-rule planning, then reservation planning for the selected local bytes, returning one combined plan plus reservation statistics.
 
 Why: PRE-UPLOAD cleanup and reservation share one consistent remote state.
 
@@ -446,45 +485,63 @@ Why: preserves mixed delete modes while minimizing delete commands, prevents con
 
 ### `clear_local_size_cache()`
 
-Clears the per-run concurrent local-size future cache.
+Clears the per-run concurrent filtered-local-snapshot future cache.
 
-Why: one run must not reuse stale size results from an earlier invocation in the same process.
-
-### `transfer_cap_bytes(transfer_bytes)`
-
-Returns measured bytes plus one byte when the size is positive.
-
-Why: an upload exactly equal to the measured size can reach the cap without being cut off at the boundary.
+Why: one run must not reuse stale file identities from an earlier invocation in the same process.
 
 ### `validate_local_upload_path(upload)`
 
 Requires the local path to exist and be a directory.
 
-Why: sizing/upload should fail before starting an invalid source command.
+Why: snapshotting/upload should fail before starting an invalid source command.
 
 ### `get_size_filter_options(upload)`
 
-Extracts only source-selection filters from `copy_options` for the local `rclone size` command.
+Extracts source-selection filters from `copy_options` for the local `rclone lsjson` snapshot. Supported selection flags include age/size filters, include/exclude/filter files, `--files-from*`, `--exclude-if-present`, `--hash-filter`, and `--ignore-case`.
 
-Why: size must measure the same selected source set, while unrelated runtime options such as stats/transfers must not pollute the sizing command.
+Why: the local snapshot must represent the same candidate set the user configured without carrying unrelated transfer options such as stats or concurrency.
+
+### `get_non_filter_copy_options(upload)`
+
+Returns `copy_options` with source-selection flags removed.
+
+Why: once quota planning has frozen the exact selected paths, the transfer uses generated `--files-from0`; rclone ignores other filters when `--files-from*` is present, so removing them keeps the command unambiguous while preserving non-filter runtime options.
 
 ### `local_size_cache_key(upload)`
 
 Uses resolved local path plus source-selection filters as the cache key.
 
-Why: multiple remotes uploading the same filtered source can share one scan safely.
+Why: multiple remotes uploading the same filtered source can share one exact scan safely.
 
-### `_calculate_filtered_local_upload_size(upload)`
+### `_calculate_filtered_local_upload_snapshot(upload)`
 
-Runs `rclone size LOCAL --json` with extracted source filters and validates non-negative JSON `bytes`/`count`.
+Runs recursive local `rclone lsjson` with source filters and validates every returned `Path`, `Size`, and `ModTime`, rejecting duplicate paths. It returns a `LocalUploadSnapshot`.
 
-Why: reservation needs provider-independent local candidate size/count from rclone's own filtering rules.
+Why: quota selection requires exact complete-file identities and modification times, not only aggregate `rclone size` output.
+
+### `get_filtered_local_upload_snapshot(job_number, upload)`
+
+Implements concurrent single-flight local snapshotting using a shared `Future`: one owner scans and matching workers wait for/reuse the exact result.
+
+Why: GDrive/Mega/OneDrive-style uploads of the same source should not each rescan the local tree.
 
 ### `get_filtered_local_upload_size(job_number, upload)`
 
-Implements concurrent single-flight sizing using a shared `Future`: one owner calculates and matching workers wait for/reuse the result.
+Compatibility helper that returns `(total_bytes, file_count)` from the cached exact local snapshot.
 
-Why: identical local sources should not be scanned once per remote at the same time.
+Why: existing internal callers/tests that only need aggregate sizing can reuse the same snapshot without another rclone command.
+
+### `newest_first_local_files(files)`
+
+Sorts filtered local candidates newest-first by rclone `ModTime`, with path as a deterministic tie-breaker.
+
+Why: when the source exceeds the configured capacity, CCTV retention should prefer the newest footage.
+
+### `select_local_upload_files(snapshot, max_upload_bytes)`
+
+Walks candidates newest-first and selects a contiguous prefix of complete files. As soon as the next complete file would exceed the remaining budget, selection stops immediately; that file and every older file are deferred to a later run. The selector never searches farther into older files for a smaller fit.
+
+Why: no partial file is intentionally transferred and a source larger than `max_total_size` becomes a successful capped upload rather than an rclone transfer-limit failure.
 
 ## `cleanup.py`
 
@@ -525,11 +582,17 @@ Returns `[]` or `['--buffer-size', configured_value]`.
 
 Why: dedicated buffer config remains separate from free-form `copy_options`.
 
+### `write_planned_upload_file_list(upload, planned_files)`
+
+Writes the frozen quota-managed selection as a collision-resistant NUL-separated `to-upload-...files0` file below `delete_list_dir`.
+
+Why: `--files-from0` safely carries exact paths including whitespace or comment-like prefixes and prevents newly-created files from entering after reservation.
+
 ### `upload_one_directory(job_number, upload)`
 
-Validates the local source and upload command, adds sync delete-mode options when applicable, applies copy options/buffer size/reservation transfer cap, runs the streamed rclone command, and records success/failure. Immediately before an `rclone sync` configured for trash mode is started, it records that the upload stage may create script-managed trash, including the case where sync later returns a failure after partial work.
+Validates the local source and upload command, adds sync delete-mode options when applicable, and for quota-managed uploads replaces source-selection filters with the generated exact `--files-from0` list while preserving non-filter options and configured buffer size. If quota planning selected zero files because the newest file already reached the cutoff, the upload stage succeeds as a no-op and starts no rclone upload command or upload-stage backend lookup. Otherwise it never adds `--max-transfer` or `--cutoff-mode`. Non-zero rclone status remains a real upload failure. Immediately before a trash-mode `sync` starts, it records that the upload stage may create script-managed trash, including partial work before a failure.
 
-Why: every upload worker has one controlled command-building path with the reservation safety options preserved, and post-upload trash cleanup can distinguish an actually attempted trash-mode sync from a config value that was never executed.
+Why: the program, not rclone's transfer ceiling, decides the successful complete-file upload set; partial/error return codes are never relabeled as success.
 
 ## `phases.py`
 
@@ -541,7 +604,7 @@ Why: shows which live state each planning/verification stage used.
 
 ### `prepare_one_remote_for_upload(job_number, upload, cleanup_directories)`
 
-Performs one remote's PRE-UPLOAD snapshot, optional filtered local sizing, cleanup/reservation planning, and combined delete execution. It does **not** run trash cleanup or upload.
+Performs one remote's PRE-UPLOAD remote snapshot, optional exact filtered local snapshot, contiguous newest-first whole-file cap selection that stops at the first non-fitting file, cleanup/reservation planning, and combined delete execution. It stores the frozen selected paths for the later upload stage. It does **not** run trash cleanup or upload.
 
 On failure it records reservation failure and skips that remote's upload.
 
@@ -687,9 +750,47 @@ Why: one concise remote-level result is derived consistently from the stage stat
 
 ### `print_final_run_result(exit_code)`
 
-Prints every remote's stage statuses, retained error text, overall result, failed remote list, and exit code under output/result locks.
+Prints the configured script name, every remote's stage statuses, retained error text, overall result, failed remote list, and exit code under output/result locks.
 
 Why: concurrent work ends with one deterministic readable summary.
+
+## `mqtt.py`
+
+### `_stage_errors(result)`
+
+Flattens retained stage errors for one remote into JSON objects containing `stage` and `error`.
+
+Why: Home Assistant can inspect structured failures while the payload also retains human-readable text.
+
+### `build_result_payload(exit_code)`
+
+Builds schema version 1 of the final MQTT JSON object: script/application identity, UTC timestamp, success/failure state, exit code, combined failure text, failed friendly remote names, and every remote's stage statuses/errors.
+
+Why: consumers such as Home Assistant receive one stable run-level event without having to parse console output.
+
+### `_load_paho_mqtt()`
+
+Imports `paho.mqtt.client` only when MQTT is actually enabled. Missing dependency becomes a clear runtime notification error.
+
+Why: existing non-MQTT installations remain dependency-free and backward compatible.
+
+### `_create_mqtt_client(mqtt, client_id)`
+
+Creates a paho client using the 2.x callback API used by the optional pinned dependency range, with a compatibility fallback for older constructor shapes.
+
+Why: optional MQTT support tolerates both major paho API generations without changing payload behavior.
+
+### `publish_result_payload(payload)`
+
+Applies configured authentication/TLS, connects to the broker, publishes compact JSON with configured QoS/retain, waits for completion, then disconnects/stops the network loop.
+
+Why: the script does not report publication success merely because a payload was queued locally.
+
+### `publish_final_result(exit_code)`
+
+No-ops when MQTT is disabled. When enabled it builds/publishes the final payload and reports publication success or failure. Transport failure is intentionally caught and logged rather than changing the completed rclone run's exit code.
+
+Why: MQTT is an optional observer/notification channel, not a prerequisite that can redefine whether the actual backup/cleanup work succeeded.
 
 ## `output.py`
 
@@ -715,7 +816,7 @@ Why: concurrent thread logs must not interleave line-by-line.
 
 ### `print_startup_summary(cleanup_directories)`
 
-Prints config path, barriered execution order, thread limits, reservation settings, each upload destination, each cleanup rule, and every resolved cleanup target.
+Prints script name, config path, barriered execution order, thread limits, reservation settings, optional MQTT settings without the password, each upload destination, each cleanup rule, and every resolved cleanup target.
 
 Why: the operator can review effective destructive paths/settings before normal work starts; `--validate-config` uses the same summary without running rclone.
 
@@ -760,9 +861,11 @@ Top-level application orchestration:
 7. run barriered pre-upload preparation/trash/upload;
 8. run barriered post-upload cleanup/trash;
 9. run final verification;
-10. aggregate overall status, mark unresolved stages skipped, print final result, and return exit code.
+10. aggregate overall status, mark unresolved stages skipped, and print final result;
+11. optionally publish the schema-versioned MQTT result;
+12. return the rclone/cleanup run exit code.
 
-Why: only this module decides application-wide phase order and final process status.
+Why: only this module decides application-wide phase order and final process status; optional MQTT publication happens only after that status is finalized and does not redefine it.
 
 # External rclone command map
 
@@ -778,11 +881,11 @@ Caller: `remote_files.get_remote_file_entries()`.
 
 Purpose: produce the PRE-UPLOAD, POST-UPLOAD, and FINAL live file snapshots.
 
-## `rclone size LOCAL --json [filters]`
+## `rclone lsjson LOCAL --recursive --files-only --no-mimetype [filters]`
 
-Caller: `reservation._calculate_filtered_local_upload_size()`.
+Caller: `reservation._calculate_filtered_local_upload_snapshot()`.
 
-Purpose: measure the exact local candidate set selected by source filters for quota reservation.
+Purpose: return exact local candidate paths, sizes, and modification times selected by source filters for whole-file quota planning.
 
 ## `rclone delete --files-from DELETE_LIST REMOTE [delete-mode options]`
 
@@ -808,19 +911,19 @@ Purpose: empty backend trash only for destinations configured for script-managed
 
 Caller: `upload.upload_one_directory()`.
 
-Purpose: copy selected source files without deleting unrelated destination files as part of upload semantics.
+Purpose: copy selected source files without deleting unrelated destination files as part of upload semantics. Quota-managed runs include generated `--files-from0 FILE` and do not use `--max-transfer`.
 
 ## `rclone sync LOCAL REMOTE [options]`
 
 Caller: `upload.upload_one_directory()`.
 
-Purpose: make the destination match the selected source according to rclone sync semantics. Delete-mode options are added when direct deletion is configured.
+Purpose: make the destination match the selected source according to rclone sync semantics. Delete-mode options are added when direct deletion is configured. Quota-managed sync rejects `--delete-excluded` because over-budget paths are intentionally excluded.
 
 ## `rclone move LOCAL REMOTE [options]`
 
 Caller: `upload.upload_one_directory()`.
 
-Purpose: transfer selected local files and allow rclone to remove successfully moved source files according to rclone move semantics.
+Purpose: transfer selected local files and allow rclone to remove successfully moved source files according to rclone move semantics. If quota planning selected zero files because the newest file already exceeded the available budget, the upload stage succeeds as a no-op and no transfer command is started.
 
 # Safety-critical ordering summary
 

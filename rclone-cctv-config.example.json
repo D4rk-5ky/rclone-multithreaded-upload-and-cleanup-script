@@ -1,4 +1,21 @@
 {
+  "script_name": "Frigate CCTV upload",
+  "mqtt": {
+    "enabled": false,
+    "host": "127.0.0.1",
+    "port": 1883,
+    "topic": "homeassistant/rclone-upload/result",
+    "username": null,
+    "password": null,
+    "client_id": null,
+    "qos": 1,
+    "retain": false,
+    "keepalive": 60,
+    "tls": false,
+    "tls_insecure": false,
+    "ca_certs": null,
+    "publish_timeout": 10
+  },
   "delete_min_age": "31d",
   "lock_file": "/var/lock/subsys/RcloneLockFile.run",
   "delete_list_dir": "/root/rclone",

@@ -148,6 +148,7 @@ def print_final_run_result(exit_code: int):
         print(OUTPUT_SEPARATOR)
         print("FINAL RUN RESULT")
         print(OUTPUT_SEPARATOR)
+        print(f"Script name: {STATE.script_name}")
 
         failed_remotes: list[str] = []
         for result in STATE.run_results.values():

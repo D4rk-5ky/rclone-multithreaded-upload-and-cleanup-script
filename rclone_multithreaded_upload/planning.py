@@ -9,7 +9,6 @@ from .remote_files import (
     get_managed_snapshot_files,
     relative_cleanup_target_path,
 )
-from .reservation import transfer_cap_bytes
 from .state import STATE
 from .utils import (
     format_bytes,
@@ -136,28 +135,33 @@ def plan_upload_reservation(
     upload: UploadDirectory,
     snapshot: RemoteSnapshot,
     plan: RemoteDeletePlan,
-    local_upload_bytes: int,
+    selected_upload_bytes: int,
 ) -> dict[str, int]:
-    """Reserve upload capacity using the already-cleaned working snapshot."""
+    """Reserve capacity for the already-selected complete local upload files."""
     if not upload.delete_excess_files or upload.max_total_size is None:
         return {
             "current_size": 0,
             "required_free_bytes": 0,
             "selected_free_bytes": 0,
-            "reserved_upload_bytes": transfer_cap_bytes(local_upload_bytes),
+            "reserved_upload_bytes": selected_upload_bytes,
             "projected_temporary_size": 0,
             "max_total_size_bytes": 0,
         }
 
     max_total_size_bytes = parse_size_to_bytes(upload.max_total_size)
-    reserved_upload_bytes = transfer_cap_bytes(local_upload_bytes)
-    if reserved_upload_bytes + STATE.reservation_safety_headroom_bytes > max_total_size_bytes:
+    reserved_upload_bytes = selected_upload_bytes
+    headroom = STATE.reservation_safety_headroom_bytes
+    if headroom > max_total_size_bytes:
         raise ValueError(
-            "Filtered local source cannot fit on an empty managed remote with the "
-            "required reservation safety headroom. "
-            f"Filtered local size={format_bytes(local_upload_bytes)}, "
-            f"reserved upload cap={format_bytes(reserved_upload_bytes)}, "
-            f"headroom={format_bytes(STATE.reservation_safety_headroom_bytes)}, "
+            "Reservation safety headroom is larger than max_total_size. "
+            f"headroom={format_bytes(headroom)}, "
+            f"max_total_size={format_bytes(max_total_size_bytes)}"
+        )
+    if reserved_upload_bytes + headroom > max_total_size_bytes:
+        raise ValueError(
+            "Selected complete local files exceed the managed upload budget. "
+            f"Selected={format_bytes(reserved_upload_bytes)}, "
+            f"headroom={format_bytes(headroom)}, "
             f"max_total_size={format_bytes(max_total_size_bytes)}"
         )
 
@@ -170,7 +174,7 @@ def plan_upload_reservation(
         0,
         current_size
         + reserved_upload_bytes
-        + STATE.reservation_safety_headroom_bytes
+        + headroom
         - max_total_size_bytes,
     )
     selected_free_bytes = 0
@@ -210,7 +214,7 @@ def build_pre_upload_plan(
     upload: UploadDirectory,
     targets: list[CleanupTarget],
     snapshot: RemoteSnapshot,
-    local_upload_bytes: int,
+    selected_upload_bytes: int,
 ) -> tuple[RemoteDeletePlan, RemoteSnapshot, dict[str, int]]:
     """Plan pre-cleanup and reservation from one recursive remote snapshot."""
     from .remote_files import clone_remote_snapshot
@@ -222,7 +226,7 @@ def build_pre_upload_plan(
         upload,
         working,
         plan,
-        local_upload_bytes,
+        selected_upload_bytes,
     )
     return plan, working, reservation
 

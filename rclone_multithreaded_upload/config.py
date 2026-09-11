@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 import json
 from pathlib import Path
 
-from .models import DirectoryCleanupRule, UploadDirectory
+from .models import DirectoryCleanupRule, MqttConfig, UploadDirectory
 from .state import STATE
 from .utils import (
     normalize_relative_path,
@@ -91,6 +91,30 @@ def optional_non_negative_int(
     return value
 
 
+def optional_int_in_range(
+    section_name: str,
+    config: dict,
+    key: str,
+    default: int,
+    minimum: int,
+    maximum: int,
+) -> int:
+    """Read an integer constrained to an inclusive range."""
+    if key not in config:
+        return default
+    value = config[key]
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int)
+        or value < minimum
+        or value > maximum
+    ):
+        raise ValueError(
+            f"{section_name}.{key} must be an integer between {minimum} and {maximum}"
+        )
+    return value
+
+
 def optional_positive_int_or_none(section_name: str, config: dict, key: str) -> int | None:
     if key not in config or config[key] is None:
         return None
@@ -108,6 +132,66 @@ def optional_string_list(section_name: str, config: dict, key: str) -> list[str]
         raise ValueError(f"{section_name}.{key} must be a list of strings")
 
     return value
+
+
+def parse_mqtt_config(config: dict) -> MqttConfig:
+    """Parse optional final-result MQTT publishing settings."""
+    raw_mqtt = config.get("mqtt", {})
+    if not isinstance(raw_mqtt, dict):
+        raise ValueError("mqtt must be an object")
+
+    enabled = optional_bool("mqtt", raw_mqtt, "enabled", False)
+    host = optional_string("mqtt", raw_mqtt, "host", None)
+    topic = optional_string(
+        "mqtt",
+        raw_mqtt,
+        "topic",
+        "rclone-multithreaded-upload/result",
+    )
+    if topic is None:
+        raise ValueError("mqtt.topic must be a non-empty string")
+    if "+" in topic or "#" in topic:
+        raise ValueError("mqtt.topic must be a publish topic without + or # wildcards")
+
+    port = optional_int_in_range("mqtt", raw_mqtt, "port", 1883, 1, 65535)
+    qos = optional_int_in_range("mqtt", raw_mqtt, "qos", 1, 0, 2)
+    keepalive = optional_int_in_range("mqtt", raw_mqtt, "keepalive", 60, 1, 65535)
+    publish_timeout = optional_int_in_range(
+        "mqtt", raw_mqtt, "publish_timeout", 10, 1, 3600
+    )
+    username = optional_string("mqtt", raw_mqtt, "username", None)
+    password = optional_string("mqtt", raw_mqtt, "password", None)
+    client_id = optional_string("mqtt", raw_mqtt, "client_id", None)
+    tls = optional_bool("mqtt", raw_mqtt, "tls", False)
+    tls_insecure = optional_bool("mqtt", raw_mqtt, "tls_insecure", False)
+    ca_certs = optional_string("mqtt", raw_mqtt, "ca_certs", None)
+    retain = optional_bool("mqtt", raw_mqtt, "retain", False)
+
+    if enabled and host is None:
+        raise ValueError("mqtt.host is required when mqtt.enabled=true")
+    if password is not None and username is None:
+        raise ValueError("mqtt.username is required when mqtt.password is configured")
+    if tls_insecure and not tls:
+        raise ValueError("mqtt.tls_insecure=true requires mqtt.tls=true")
+    if ca_certs is not None and not tls:
+        raise ValueError("mqtt.ca_certs requires mqtt.tls=true")
+
+    return MqttConfig(
+        enabled=enabled,
+        host=host,
+        port=port,
+        topic=topic,
+        username=username,
+        password=password,
+        client_id=client_id,
+        qos=qos,
+        retain=retain,
+        keepalive=keepalive,
+        tls=tls,
+        tls_insecure=tls_insecure,
+        ca_certs=ca_certs,
+        publish_timeout=publish_timeout,
+    )
 
 
 def parse_cleanup_rules(
@@ -238,8 +322,21 @@ def parse_upload_directories(config: dict) -> list[UploadDirectory]:
             if option_name in script_managed_flags:
                 raise ValueError(
                     f"{section_name}.copy_options must not contain {option_name}; "
-                    "the script manages this flag through dedicated reservation/runtime settings"
+                    "the application reserves this flag for its own safety/runtime behavior"
                 )
+
+        if (
+            upload_command == "sync"
+            and delete_excess_files
+            and max_total_size is not None
+            and any(option.split("=", 1)[0] == "--delete-excluded" for option in copy_options)
+        ):
+            raise ValueError(
+                f"{section_name}.copy_options must not contain --delete-excluded when "
+                "quota-managed sync is enabled; the generated complete-file upload list "
+                "intentionally excludes over-budget files and --delete-excluded could "
+                "delete those excluded paths from the destination"
+            )
 
         uploads.append(
             UploadDirectory(
@@ -274,6 +371,12 @@ def load_config(config_path_text: str):
         )
 
     uploads = parse_upload_directories(config)
+    script_name = optional_string(
+        "root", config, "script_name", "rclone-multithreaded-upload"
+    )
+    if script_name is None:
+        raise ValueError("root.script_name must be a non-empty string")
+    mqtt_config = parse_mqtt_config(config)
     delete_min_age = optional_string(
         "root", config, "delete_min_age", STATE.delete_min_age
     )
@@ -324,6 +427,8 @@ def load_config(config_path_text: str):
     assert lock_file_text is not None
     assert delete_list_dir_text is not None
 
+    STATE.script_name = script_name
+    STATE.mqtt = mqtt_config
     STATE.upload_directories = uploads
     STATE.delete_min_age = delete_min_age
     STATE.upload_threads = upload_threads

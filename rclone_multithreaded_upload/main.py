@@ -6,6 +6,7 @@ import signal
 from .cli import parse_cli_args
 from .config import load_config
 from .lock import acquire_lock, release_lock, signal_handler
+from .mqtt import publish_final_result
 from .output import print_error, print_step
 from .phases import (
     run_final_verification,
@@ -74,4 +75,5 @@ def main() -> int:
     if not overall_success:
         mark_pending_stages_skipped()
     print_final_run_result(exit_code)
+    publish_final_result(exit_code)
     return exit_code

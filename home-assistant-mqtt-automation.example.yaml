@@ -1,0 +1,66 @@
+alias: Rclone upload result via MQTT
+description: >-
+  Receives the final JSON result from rclone-multithreaded-upload and sends
+  both a Pushover notification and a Home Assistant persistent notification.
+triggers:
+  - trigger: mqtt
+    topic: "homeassistant/rclone-upload/result"
+conditions: []
+actions:
+  - variables:
+      run_name: "{{ trigger.payload_json.script_name | default('Rclone upload', true) }}"
+      result_status: "{{ trigger.payload_json.status | default('failure', true) }}"
+      error_text: "{{ trigger.payload_json.error | default('Unknown error', true) }}"
+      failed_remotes: >-
+        {{ trigger.payload_json.failed_remotes | default([], true) | join(', ') }}
+      remote_names: >-
+        {{ trigger.payload_json.remotes | default([], true)
+           | map(attribute='name') | list | join(', ') }}
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ result_status == 'success' }}"
+        sequence:
+          # Replace notify.pushover with your actual Pushover notify action/entity.
+          - action: notify.pushover
+            data:
+              title: "{{ run_name }} - SUCCESS"
+              message: >-
+                {{ run_name }} finished successfully.
+                {% if remote_names %} Remotes: {{ remote_names }}.{% endif %}
+          - action: persistent_notification.create
+            data:
+              title: "{{ run_name }} - SUCCESS"
+              message: >-
+                {{ run_name }} finished successfully.
+                {% if remote_names %} Remotes: {{ remote_names }}.{% endif %}
+      - conditions:
+          - condition: template
+            value_template: "{{ result_status == 'failure' }}"
+        sequence:
+          # Replace notify.pushover with your actual Pushover notify action/entity.
+          - action: notify.pushover
+            data:
+              title: "{{ run_name }} - FAILED"
+              message: >-
+                {{ run_name }} failed.
+                {% if failed_remotes %} Failed remotes: {{ failed_remotes }}.{% endif %}
+                Error: {{ error_text }}
+          - action: persistent_notification.create
+            data:
+              title: "{{ run_name }} - FAILED"
+              message: |-
+                {{ run_name }} failed.
+                {% if failed_remotes %}Failed remotes: {{ failed_remotes }}.
+                {% endif %}Error:
+                {{ error_text }}
+    default:
+      # A malformed/unknown payload should not silently disappear.
+      - action: persistent_notification.create
+        data:
+          title: "Rclone MQTT result has unknown status"
+          message: >-
+            Received an unexpected MQTT result for {{ run_name }}:
+            {{ trigger.payload }}
+mode: queued
+max: 10
