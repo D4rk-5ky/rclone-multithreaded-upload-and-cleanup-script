@@ -109,3 +109,6 @@ class RemoteRunResult:
     upload: StageRunResult = field(default_factory=StageRunResult)
     post_cleanup: StageRunResult = field(default_factory=StageRunResult)
     final_quota: StageRunResult = field(default_factory=StageRunResult)
+    reservation_trash_deleted: bool = False
+    upload_trash_mode_attempted: bool = False
+    post_cleanup_trash_deleted: bool = False

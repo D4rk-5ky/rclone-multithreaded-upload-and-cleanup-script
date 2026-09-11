@@ -1,6 +1,7 @@
 """Pure parsing, path, time, and formatting helpers."""
 
 from datetime import datetime, timedelta, timezone
+import hashlib
 import re
 
 from .models import RemoteFile, RemoteQuotaFile
@@ -9,11 +10,20 @@ from .models import RemoteFile, RemoteQuotaFile
 ALLOWED_UPLOAD_COMMANDS = {"copy", "sync", "move"}
 
 
+_STRICT_SIZE_RE = re.compile(r"(?P<value>\d+)(?P<unit>K|KB|M|MB|G|GB|T|TB)", re.IGNORECASE)
+
+
 def parse_size_to_bytes(size_text: str) -> int:
-    """Convert sizes like 500M, 50G, and 1T into binary bytes."""
-    size_text = size_text.strip().upper()
+    """Parse a strict whole-number K/KB/M/MB/G/GB/T/TB size into binary bytes."""
+    text = size_text.strip()
+    match = _STRICT_SIZE_RE.fullmatch(text)
+    if match is None:
+        raise ValueError(
+            f"Invalid size {size_text!r}. Use a whole number followed by "
+            "K, KB, M, MB, G, GB, T, or TB (for example 64M or 500GB)."
+        )
+
     units = {
-        "B": 1,
         "K": 1024,
         "KB": 1024,
         "M": 1024**2,
@@ -23,23 +33,9 @@ def parse_size_to_bytes(size_text: str) -> int:
         "T": 1024**4,
         "TB": 1024**4,
     }
-
-    number_part = ""
-    unit_part = ""
-    for char in size_text:
-        if char.isdigit() or char == ".":
-            number_part += char
-        else:
-            unit_part += char
-
-    if not number_part:
-        raise ValueError(f"Invalid size: {size_text}")
-    if not unit_part:
-        unit_part = "B"
-    if unit_part not in units:
-        raise ValueError(f"Invalid size unit: {unit_part}")
-
-    return int(float(number_part) * units[unit_part])
+    value = int(match.group("value"))
+    unit = match.group("unit").upper()
+    return value * units[unit]
 
 
 _GO_DURATION_TOKEN_RE = re.compile(
@@ -146,9 +142,13 @@ def validate_upload_command(command: str) -> str:
 
 
 def remote_name_from_path(remote_path: str) -> str:
-    safe_name = remote_path.replace(":", "_")
-    safe_name = safe_name.replace("/", "_")
-    return safe_name.strip("_")
+    """Return a readable, deterministic delete-list filename component with a path hash."""
+    readable = re.sub(r"[^A-Za-z0-9._-]+", "_", remote_path).strip("_.-")
+    if not readable:
+        readable = "remote"
+    readable = readable[:80]
+    digest = hashlib.sha256(remote_path.encode("utf-8")).hexdigest()
+    return f"{readable}-{digest}"
 
 
 def join_rclone_remote_path(remote_root: str, relative_path: str) -> str:

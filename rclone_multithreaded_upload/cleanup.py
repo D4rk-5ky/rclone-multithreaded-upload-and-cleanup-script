@@ -4,7 +4,7 @@ from .commands import run_command
 from .delete_plan import execute_delete_plan
 from .models import RemoteDeletePlan, UploadDirectory
 from .output import print_job_block
-from .results import command_error_summary, record_stage_failure
+from .results import command_error_summary, record_stage_failure, script_managed_trash_used
 
 
 __all__ = ["execute_delete_plan", "cleanup_one_trash_remote"]
@@ -27,14 +27,15 @@ def cleanup_one_trash_remote(
         )
         return True
 
-    if not upload.delete_to_trash:
+    if not script_managed_trash_used(upload.remote_path, stage_name):
         print_job_block(
             "TRASH CLEANUP JOB",
             job_number,
             upload.remote_path,
             (
-                "delete_to_trash=False, script cleanup deletions are direct; "
-                "skipping rclone cleanup because no script-managed trash needs emptying"
+                "No script-managed trash-mode deletion was successfully executed or "
+                "started for this stage; skipping rclone cleanup so unrelated backend "
+                "trash is not emptied."
             ),
         )
         return True

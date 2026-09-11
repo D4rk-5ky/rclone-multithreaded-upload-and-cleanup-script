@@ -6,7 +6,12 @@ from .models import UploadDirectory
 from .output import OUTPUT_LOCK, OUTPUT_SEPARATOR, print_job_block
 from .rclone_backend import get_delete_mode_options
 from .reservation import transfer_cap_bytes, validate_local_upload_path
-from .results import command_error_summary, record_stage_failure, record_stage_success
+from .results import (
+    command_error_summary,
+    record_stage_failure,
+    record_stage_success,
+    record_upload_trash_mode_attempted,
+)
 from .state import STATE
 from .utils import validate_upload_command
 
@@ -111,6 +116,9 @@ def upload_one_directory(job_number: int, upload: UploadDirectory) -> bool:
         upload.local_path,
         upload.remote_path,
     ] + upload_delete_options + upload.copy_options + buffer_options + transfer_cap_options
+
+    if upload_command == "sync" and upload.delete_to_trash:
+        record_upload_trash_mode_attempted(upload.remote_path)
 
     return_code, command_output = run_command_streamed(
         command=command,

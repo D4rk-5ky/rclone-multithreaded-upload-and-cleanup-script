@@ -86,9 +86,9 @@ Why: failures must survive until the final summary even when later stages contin
 
 ### `RemoteRunResult`
 
-Contains the four final summary groups for one remote: reservation, upload, post cleanup, final quota.
+Contains the four final summary groups for one remote: reservation, upload, post cleanup, final quota. It also retains three internal trash-activity markers: successful reservation-plan trash deletion, an actually started trash-mode upload `sync`, and successful post-cleanup-plan trash deletion.
 
-Why: one failed remote can be reported without losing status for the other remotes.
+Why: one failed remote can be reported without losing status for the other remotes, and later trash cleanup can distinguish script-managed trash activity from hard-delete-only work.
 
 ## `state.py`
 
@@ -206,15 +206,15 @@ Why: cleanup ownership and inheritance are resolved deterministically.
 
 ### `parse_upload_directories(config)`
 
-Builds every `UploadDirectory`, validates upload command, sizes, buffer size, booleans, cleanup rules, and extra rclone options.
+Builds every `UploadDirectory`, validates upload command, sizes, buffer size, booleans, cleanup rules, and extra rclone options. It tracks exact destination strings while parsing and rejects a repeated `remote_path` with an explicit safety warning before runtime state can collapse two destinations into one key.
 
 It rejects script-managed flags inside `copy_options`, including `--max-transfer`, `--cutoff-mode`, and `--buffer-size`.
 
-Why: users cannot accidentally override the reservation safety cap or dedicated runtime settings.
+Why: users cannot accidentally override the reservation safety cap or dedicated runtime settings, and destructive workers cannot be launched concurrently for an identical destination.
 
 ### `load_config(config_path_text)`
 
-Loads the complete config into `STATE`, validates thread limits, paths, and legacy schema rejection.
+Loads the complete config into `STATE`, validates thread limits, paths, and legacy schema rejection. It also fully parses `delete_min_age` before assigning runtime state, so `--validate-config` catches invalid age/duration values instead of deferring the error until cleanup planning.
 
 It rejects obsolete top-level `directory_cleanup_rules`.
 
@@ -224,9 +224,9 @@ Why: all validation completes before execution begins, and cleanup rules are for
 
 ### `parse_size_to_bytes(size_text)`
 
-Converts values such as `500M`, `12G`, and `1T` to binary bytes.
+Strictly accepts a whole number immediately followed by `K`, `KB`, `M`, `MB`, `G`, `GB`, `T`, or `TB` (case-insensitive after trimming), then converts it to binary bytes. Malformed placements, decimals, bare bytes, IEC spellings, and embedded spaces are rejected.
 
-Why: all cleanup/reservation comparisons use integers rather than mixed text units.
+Why: all cleanup/reservation comparisons use integers, and a typo such as `G1` or `1G2` must fail closed instead of silently becoming a different size.
 
 ### `parse_duration_to_timedelta(duration_text)`
 
@@ -248,9 +248,9 @@ Why: prevents arbitrary command names from being injected into the application-c
 
 ### `remote_name_from_path(remote_path)`
 
-Converts a remote path to a filesystem-safe fragment used in delete-list filenames.
+Builds a filesystem-safe readable fragment, truncates that readable portion, and appends the full SHA-256 digest of the original `remote_path`.
 
-Why: generated local filenames must not contain rclone path separators/colon syntax.
+Why: generated local filenames must avoid rclone path separators/colon syntax **and** distinct remote paths that sanitize to the same text (for example `a:b/c` and `a_b:c`) must not share a delete-list filename.
 
 ### `join_rclone_remote_path(remote_root, relative_path)`
 
@@ -438,9 +438,9 @@ Why: destructive plans should be visible in logs.
 
 ### `execute_delete_plan(job_number, upload, plan, stage_name)`
 
-Groups selected files by trash/direct mode, writes sorted `--files-from` lists, executes one rclone delete per required mode, and records failures.
+Groups selected files by trash/direct mode, writes sorted `--files-from` lists, executes one rclone delete per required mode, and records failures. Delete-list filenames use the collision-resistant remote-name helper. After a trash-mode delete command succeeds, it records trash activity against the exact reservation/post-cleanup stage; a hard-delete command never sets that marker.
 
-Why: preserves mixed delete modes while minimizing delete commands and retaining per-remote failure isolation.
+Why: preserves mixed delete modes while minimizing delete commands, prevents concurrent delete-list collisions, and lets later `rclone cleanup` run only for script-managed trash activity.
 
 ## `reservation.py`
 
@@ -495,11 +495,13 @@ Runs optional `rclone cleanup` for one upload remote.
 Behavior:
 
 - `empty_trash=false` -> skip successfully.
-- `delete_to_trash=false` -> skip successfully because script-managed deletes are direct.
+- no tracked script-managed trash activity for the relevant barrier -> skip successfully, regardless of the upload-level default.
+- pre-upload activity means a successful reservation-plan trash delete.
+- post-upload activity means a successful post-cleanup-plan trash delete or an actually started trash-mode `sync`.
 - backend reports cleanup unsupported -> skip successfully.
 - other non-zero result -> record failure against reservation or post-cleanup stage depending on phase.
 
-Why: trash emptying is optional and backend-dependent, and direct-delete mode must not purge unrelated trash.
+Why: trash emptying is optional and backend-dependent, and upload defaults or hard-delete overrides must not purge unrelated backend trash.
 
 `cleanup.py` also re-exports `execute_delete_plan` so phase code can import both cleanup actions from one module.
 
@@ -525,9 +527,9 @@ Why: dedicated buffer config remains separate from free-form `copy_options`.
 
 ### `upload_one_directory(job_number, upload)`
 
-Validates the local source and upload command, adds sync delete-mode options when applicable, applies copy options/buffer size/reservation transfer cap, runs the streamed rclone command, and records success/failure.
+Validates the local source and upload command, adds sync delete-mode options when applicable, applies copy options/buffer size/reservation transfer cap, runs the streamed rclone command, and records success/failure. Immediately before an `rclone sync` configured for trash mode is started, it records that the upload stage may create script-managed trash, including the case where sync later returns a failure after partial work.
 
-Why: every upload worker has one controlled command-building path with the reservation safety options preserved.
+Why: every upload worker has one controlled command-building path with the reservation safety options preserved, and post-upload trash cleanup can distinguish an actually attempted trash-mode sync from a config value that was never executed.
 
 ## `phases.py`
 
@@ -640,6 +642,24 @@ Why: all relevant failure causes should survive to the final report.
 Changes only a still-pending stage to `SKIPPED`.
 
 Why: failed prerequisites should visibly prevent dependent work without overwriting existing status.
+
+### `record_delete_plan_trash_deleted(remote_path, stage_name)`
+
+Marks the reservation or post-cleanup trash-activity flag only after a trash-mode planned-delete command returned success. Unsupported stage names are rejected.
+
+Why: later trash cleanup must be driven by what the script actually sent to backend trash, not merely by an inherited default.
+
+### `record_upload_trash_mode_attempted(remote_path)`
+
+Marks that an `rclone sync` using backend trash mode was actually started for the remote.
+
+Why: sync can delete destination-only files before either succeeding or failing, so post-upload cleanup needs to remember that possible script-managed trash activity.
+
+### `script_managed_trash_used(remote_path, stage_name)`
+
+For the reservation barrier, returns whether a successful planned trash deletion occurred. For the post-cleanup barrier, returns whether either a successful post-cleanup trash deletion occurred or a trash-mode sync was actually started.
+
+Why: `cleanup_one_trash_remote()` needs one concurrency-safe source of truth for whether `rclone cleanup` is justified.
 
 ### `finalize_stage_for_all(stage_name)`
 

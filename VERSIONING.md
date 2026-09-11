@@ -10,6 +10,40 @@ Rollover rule:
 
 `0.0.100` is not used.
 
+## 0.0.22
+
+Delete-mode safety, collision-resistant delete lists, and strict config validation release.
+
+### Code
+
+- Incremented the application version from `0.0.21` to `0.0.22`.
+- Made generated delete-list remote-name fragments collision-resistant by appending the full SHA-256 digest of the original `remote_path` to a bounded readable filename component. Distinct legacy-colliding paths such as `a:b/c` and `a_b:c` now generate different files.
+- Preserved separate trash and hard-delete groups in combined plans and added per-run tracking for **actual script-managed trash activity**.
+- A successful planned trash-mode delete now marks only its exact reservation or post-cleanup stage as having used trash. Successful hard-delete commands never set that marker.
+- `rclone cleanup` no longer decides from the upload-level `delete_to_trash` default alone. It now requires `empty_trash=true` plus tracked script-managed trash activity for the relevant stage.
+- Cleanup-rule `delete_to_trash` overrides are therefore respected in both directions: an explicit trash rule can trigger cleanup even when the upload default is hard delete, while hard-delete-only planned work does not empty unrelated backend trash even when the upload default is trash.
+- Preserved `sync` semantics by recording when an `rclone sync` configured for trash mode is actually started; post-upload trash cleanup can therefore handle destination files that sync may have moved to trash, including partial work before a failed sync. A configured sync that never starts does not set the marker.
+- Exact duplicate upload `remote_path` values now produce an explicit safety `WARNING` and make config loading fail before runtime state, worker scheduling, locking, or rclone activity. This prevents duplicate destinations from collapsing dictionaries keyed by `remote_path` or receiving concurrent destructive work.
+- `delete_min_age` is now fully parsed during `load_config()`, so `--validate-config` rejects malformed age/duration/timestamp values before execution.
+- Replaced permissive size parsing with strict whole-number syntax. Dedicated size settings now accept only `K`, `KB`, `M`, `MB`, `G`, `GB`, `T`, or `TB` suffixes and reject malformed/ambiguous inputs such as `G1`, `1G2`, `1.5M`, `1B`, `1GiB`, and embedded-space forms. Binary 1024-based multipliers are preserved.
+
+### Documentation and configuration
+
+- Updated `README.md` to document current duplicate-destination rejection, strict size syntax, full `delete_min_age` validation, collision-resistant delete-list filenames, and exact trash/hard-delete cleanup behavior.
+- Updated `commented_code_map.md` for the modified config, parsing, deletion, upload, cleanup, and result-tracking functions, including the new trash-activity helpers.
+- The config schema gained no new options and removed none. Both packaged config examples already contain the complete active option set and were revalidated unchanged.
+
+### Tests and verification
+
+- Expanded the automated suite from 17 to 24 tests.
+- Added regression coverage proving the two example legacy-colliding remote paths generate distinct delete-list filename components.
+- Added mixed-mode deletion coverage proving hard and trash files stay in separate commands and trash cleanup is enabled only by successful trash-mode deletion.
+- Added coverage proving a hard-delete-only plan does not run `rclone cleanup` even when the upload-level default is trash.
+- Added coverage proving an actually started trash-mode `sync` is remembered for post-upload trash cleanup.
+- Added `--validate-config` coverage for invalid `delete_min_age`, malformed size values, and duplicate upload destinations.
+- Updated planning tests to use the new strict size syntax while preserving the same reservation/oldest-file logic.
+- Re-ran compile, CLI/version/help, both packaged config validations, full unit suite, fake-rclone end-to-end integration, checksum, documentation-map, and clean-archive checks before packaging.
+
 ## 0.0.21
 
 Complete CLI self-documentation release.

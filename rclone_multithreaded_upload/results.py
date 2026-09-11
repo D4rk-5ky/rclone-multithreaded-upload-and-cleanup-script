@@ -47,6 +47,36 @@ def record_stage_skipped(remote_path: str, stage_name: str):
             stage.status = "SKIPPED"
 
 
+def record_delete_plan_trash_deleted(remote_path: str, stage_name: str) -> None:
+    """Record that a successful planned-delete command actually used trash mode."""
+    field_names = {
+        "reservation": "reservation_trash_deleted",
+        "post_cleanup": "post_cleanup_trash_deleted",
+    }
+    field_name = field_names.get(stage_name)
+    if field_name is None:
+        raise ValueError(f"Trash-delete tracking is unsupported for stage: {stage_name}")
+    with STATE.run_results_lock:
+        setattr(STATE.run_results[remote_path], field_name, True)
+
+
+def record_upload_trash_mode_attempted(remote_path: str) -> None:
+    """Record that an rclone sync using backend trash mode was actually started."""
+    with STATE.run_results_lock:
+        STATE.run_results[remote_path].upload_trash_mode_attempted = True
+
+
+def script_managed_trash_used(remote_path: str, stage_name: str) -> bool:
+    """Return whether the requested trash-cleanup barrier follows script-managed trash use."""
+    with STATE.run_results_lock:
+        result = STATE.run_results[remote_path]
+        if stage_name == "reservation":
+            return result.reservation_trash_deleted
+        if stage_name == "post_cleanup":
+            return result.post_cleanup_trash_deleted or result.upload_trash_mode_attempted
+    raise ValueError(f"Trash-use lookup is unsupported for stage: {stage_name}")
+
+
 def finalize_stage_for_all(stage_name: str):
     with STATE.run_results_lock:
         for result in STATE.run_results.values():

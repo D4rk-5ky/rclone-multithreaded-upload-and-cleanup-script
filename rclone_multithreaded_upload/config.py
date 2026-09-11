@@ -1,11 +1,17 @@
 """External JSON configuration loading and validation."""
 
+from datetime import datetime, timezone
 import json
 from pathlib import Path
 
 from .models import DirectoryCleanupRule, UploadDirectory
 from .state import STATE
-from .utils import normalize_relative_path, parse_size_to_bytes, validate_upload_command
+from .utils import (
+    normalize_relative_path,
+    parse_rclone_age_cutoff,
+    parse_size_to_bytes,
+    validate_upload_command,
+)
 
 
 def load_json_config(config_path: Path) -> dict:
@@ -162,6 +168,7 @@ def parse_upload_directories(config: dict) -> list[UploadDirectory]:
         raise ValueError("upload_directories must be a non-empty list")
 
     uploads: list[UploadDirectory] = []
+    seen_remote_paths: dict[str, int] = {}
     for index, raw_upload in enumerate(raw_uploads, start=1):
         section_name = f"upload_directories[{index}]"
         if not isinstance(raw_upload, dict):
@@ -169,6 +176,17 @@ def parse_upload_directories(config: dict) -> list[UploadDirectory]:
 
         local_path = require_string(section_name, raw_upload, "local_path")
         remote_path = require_string(section_name, raw_upload, "remote_path")
+        previous_index = seen_remote_paths.get(remote_path)
+        if previous_index is not None:
+            raise ValueError(
+                "WARNING: duplicate upload destination detected: "
+                f"{section_name}.remote_path exactly matches "
+                f"upload_directories[{previous_index}].remote_path ({remote_path!r}). "
+                "Refusing to continue because duplicate destinations can collide in "
+                "per-remote runtime state and can run destructive operations concurrently."
+            )
+        seen_remote_paths[remote_path] = index
+
         name = optional_string(section_name, raw_upload, "name", None)
         upload_command = validate_upload_command(
             optional_string(section_name, raw_upload, "upload_command", "copy")  # type: ignore[arg-type]
@@ -260,6 +278,10 @@ def load_config(config_path_text: str):
         "root", config, "delete_min_age", STATE.delete_min_age
     )
     assert delete_min_age is not None
+    try:
+        parse_rclone_age_cutoff(delete_min_age, datetime.now(timezone.utc))
+    except ValueError as error:
+        raise ValueError(f"root.delete_min_age is invalid: {error}") from error
 
     thread_limits = config.get("thread_limits", {})
     if not isinstance(thread_limits, dict):

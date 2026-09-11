@@ -7,7 +7,11 @@ from .commands import run_command
 from .models import CleanupTarget, PlannedDeletion, RemoteDeletePlan, RemoteFile, RemoteSnapshot, UploadDirectory
 from .output import print_job_block
 from .rclone_backend import get_delete_mode_options
-from .results import command_error_summary, record_stage_failure
+from .results import (
+    command_error_summary,
+    record_delete_plan_trash_deleted,
+    record_stage_failure,
+)
 from .state import STATE
 from .utils import format_bytes, remote_name_from_path
 
@@ -126,6 +130,9 @@ def execute_delete_plan(
                 f"{plan.phase_name} delete failed.\n{detail}",
             )
             return False
+
+        if delete_to_trash:
+            record_delete_plan_trash_deleted(upload.remote_path, stage_name)
 
         print_job_block(
             "COMBINED DELETE",

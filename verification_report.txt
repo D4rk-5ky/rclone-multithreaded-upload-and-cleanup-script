@@ -1,91 +1,116 @@
-rclone-multithreaded-upload v0.0.21 verification report
-Date: 2026-09-07
+rclone-multithreaded-upload v0.0.22 verification report
+Date: 2026-09-10
 
 SCOPE
 -----
-This release improves only the command-line parser, built-in CLI documentation,
-and regression coverage. Upload, cleanup, reservation, deletion, stage-barrier,
-threading, and safety behavior are unchanged from v0.0.20.
+This release fixes five requested safety/validation issues while preserving the
+existing stage barriers, per-remote failure isolation, oldest-first whole-file
+planning, reservation headroom, upload transfer cap, and backend-specific hard
+delete behavior.
 
-CLI HELP BEHAVIOR
------------------
-The executable now documents every supported user-facing flag in --help:
+DELETE-LIST COLLISION SAFETY
+----------------------------
+Generated --files-from names no longer depend only on lossy replacement of ':'
+and '/'. remote_name_from_path() now combines a bounded readable fragment with
+the full SHA-256 digest of the original remote_path.
 
-- -h / --help
-  Prints the complete CLI help, including every flag, explanation, examples,
-  and the usage line, then exits.
+Regression coverage proves the former collision example:
+- a:b/c
+- a_b:c
 
-- -c PATH / --config PATH
-  Selects the JSON configuration file. Required for normal runs and for
-  --validate-config.
+now produces distinct deterministic filename components.
 
-- --validate-config
-  Loads and validates the config, prints the effective startup summary, then
-  exits without lock creation or rclone execution.
+TRASH VS HARD-DELETE SAFETY
+---------------------------
+Combined cleanup plans still preserve the delete mode attached to each selected
+file and still execute separate rclone delete commands when a plan mixes trash
+and hard-delete entries.
 
-- --version
-  Prints the application version and exits without requiring a config file.
+Trash cleanup is no longer based only on the upload-level delete_to_trash
+default. Per-run result state records actual script-managed trash activity:
+- successful reservation-plan trash deletion;
+- an actually started rclone sync using trash mode;
+- successful post-cleanup-plan trash deletion.
 
-INVALID CLI INPUT
------------------
-FullHelpArgumentParser overrides argparse's normal terse error path.
+rclone cleanup now requires empty_trash=true plus relevant tracked trash
+activity. As a result:
+- explicit cleanup-rule trash overrides work even if the upload default is hard;
+- hard-delete-only cleanup does not empty unrelated backend trash even if the
+  upload default is trash;
+- mixed plans preserve both modes;
+- an actually started trash-mode sync remains eligible for post-upload trash
+  cleanup because sync can delete destination-only files before succeeding or
+  failing;
+- a configured trash-mode sync that never starts does not set the marker.
 
-Any CLI parsing error now:
-1. prints the complete help/options text;
-2. prints the specific argparse error;
-3. exits with argparse status 2.
+DUPLICATE DESTINATION SAFETY
+----------------------------
+An exact duplicate upload_directories[].remote_path now emits an explicit
+WARNING in the config error and refuses to continue. This is intentionally a
+validation failure rather than a non-blocking warning because runtime/result
+state is keyed by remote_path and concurrent destructive work against the exact
+same destination is unsafe.
 
-Verified examples include:
-- unknown/misspelled option: --wrong-flag;
-- missing required -c/--config.
+DELETE_MIN_AGE VALIDATION
+-------------------------
+load_config() now fully parses delete_min_age before assigning runtime state.
+--validate-config therefore rejects malformed durations/timestamps instead of
+allowing the error to appear later during cleanup planning.
 
-The normal --help and --version paths still exit successfully without requiring
-a configuration file.
+STRICT SIZE PARSER
+------------------
+Dedicated application size settings now accept only a whole number immediately
+followed by one of:
 
-DOCUMENTATION
--------------
-- README.md documents current v0.0.21 behavior only and lists every CLI flag.
-- commented_code_map.md documents FullHelpArgumentParser, error(),
-  build_cli_parser(), and parse_cli_args(), including why each exists.
-- VERSIONING.md records the complete v0.0.21 change set.
-- Config schema and both config examples are unchanged because this release adds
-  no configuration option.
+K, KB, M, MB, G, GB, T, TB
+
+Binary 1024-based multipliers are preserved. Regression tests verify valid forms
+and reject malformed/ambiguous forms including G1, 1G2, 1.5M, 1B, 1GiB, and
+embedded-space values.
+
+CONFIGURATION / DOCUMENTATION
+-----------------------------
+- Config schema: unchanged; no options added or removed.
+- config.example.json: revalidated and contains the complete active option set.
+- rclone-cctv-config.example.json: revalidated and contains the complete active
+  option set.
+- README.md: current v0.0.22 behavior only; documents all CLI flags, config
+  settings, strict size syntax, delete_min_age validation, duplicate destination
+  handling, delete modes, trash cleanup, generated delete-list naming, and rclone
+  commands.
+- commented_code_map.md: checked against package AST; all 105 documented AST
+  items (top-level functions/classes plus non-dunder class methods) are represented.
+- VERSIONING.md: records the complete v0.0.22 change set.
 
 FINAL AUTOMATED CHECKS
 ----------------------
-- --version: PASS, reports 0.0.21.
-- --help: PASS, contains every supported CLI flag and explanation.
-- unknown flag: PASS, exits 2, prints full help, then identifies the bad flag.
-- missing --config: PASS, exits 2 and prints full help before the error.
+- --version: PASS, reports 0.0.22.
+- --help: PASS, contains every supported CLI flag.
 - --validate-config config.example.json: PASS.
 - --validate-config rclone-cctv-config.example.json: PASS.
-- compileall: PASS for the compatibility entry point, package, and tests.
+- packaged config schema-key audit: PASS.
+- invalid delete_min_age through --validate-config: PASS (rejected).
+- malformed size through --validate-config: PASS (rejected).
+- exact duplicate remote_path through --validate-config: PASS (WARNING + rejected).
+- compileall: PASS for entry point, package, and tests.
 - package imports: PASS for all 21 package modules discovered by pkgutil.
-- commented_code_map.md coverage: PASS for every top-level package function/class.
-- README current-version check: PASS.
-- unittest discovery: PASS, 17 tests.
-- fake-rclone integration: PASS.
+- commented_code_map.md coverage: PASS, 105 documented AST items checked.
+- README current-version check: PASS; only 0.0.22 appears.
+- unittest discovery: PASS, 24 tests.
+- fake-rclone end-to-end integration: PASS.
 
-NEW CLI REGRESSION TESTS
-------------------------
-The test suite now explicitly verifies:
-- --help includes -h/--help, -c/--config, --validate-config, and --version;
-- each option has user-facing explanatory text;
-- an unknown flag prints the complete help and returns exit status 2;
-- missing required --config also prints the complete help and returns status 2.
-
-SAFETY / RUNTIME BEHAVIOR
--------------------------
-No upload/cleanup runtime logic was changed in v0.0.21. The v0.0.20 global stage
-barriers, failure isolation, prerequisite skips, three-snapshot planner,
-oldest-first whole-file deletion, reservation headroom, transfer cap, backend
-hard-delete handling, post-upload cleanup, and final verification behavior remain
-unchanged.
+REGRESSION TEST COUNT
+---------------------
+The automated suite increased from 17 tests in v0.0.21 to 24 tests in v0.0.22.
+The new coverage includes delete-list collision resistance, mixed delete modes,
+hard-delete-only trash protection, trash-mode sync tracking, invalid
+delete_min_age validation, malformed size validation, and duplicate destination
+rejection.
 
 NOT FULLY TESTED
 ----------------
 No destructive test was run against real Google Drive, MEGA, OneDrive, crypt
-wrappers, or other live cloud remotes. Provider pagination, rate limiting,
-throttling, trash semantics, permissions, network interruptions, concurrent live
-remote changes, and real long-running transfers therefore remain outside the
-local automated test environment.
+wrappers, or other live cloud remotes. Provider-specific trash behavior,
+pagination, throttling/rate limits, permissions, network interruptions,
+concurrent live remote changes, and real long-running transfers remain outside
+the local automated test environment.

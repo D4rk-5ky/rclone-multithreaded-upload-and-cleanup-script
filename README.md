@@ -33,7 +33,7 @@ Always test with disposable data or a test remote first, run `--validate-config`
 
 # rclone-multithreaded-upload
 
-Version 0.0.21
+Version 0.0.22
 
 `rclone-multithreaded-upload` uploads one or more local directories to independent rclone destinations while enforcing configured age, file-count, folder-size, and managed remote-size limits.
 
@@ -242,7 +242,7 @@ Start from `config.example.json` or the CCTV-oriented `rclone-cctv-config.exampl
 
 | Option | Required | Meaning |
 | --- | --- | --- |
-| `delete_min_age` | No | Rclone-style age/duration used by cleanup rules that have `delete_old_files=true`. Default runtime value is `31d`. |
+| `delete_min_age` | No | Rclone-style age/duration used by cleanup rules that have `delete_old_files=true`. Default runtime value is `31d`. The value is fully parsed during config loading/`--validate-config`; invalid durations or timestamps are rejected before execution. |
 | `lock_file` | No | Single-instance lock-file path. |
 | `delete_list_dir` | No | Directory used for generated `--files-from` delete lists. |
 | `sleep_after_step` | No | Seconds each eligible remote waits after pre-upload trash cleanup before the upload barrier can complete. Non-negative integer. |
@@ -266,14 +266,14 @@ Every thread limit must be at least `1`.
 | --- | --- | --- |
 | `name` | No | Friendly name used in summaries. |
 | `local_path` | Yes | Local source directory. |
-| `remote_path` | Yes | Rclone destination root, for example `EncryptedDrive:CCTV`. |
+| `remote_path` | Yes | Rclone destination root, for example `EncryptedDrive:CCTV`. The exact same `remote_path` may not appear twice: duplicate destinations produce a safety warning and the config is rejected before any remote work starts. |
 | `upload_command` | No | `copy`, `sync`, or `move`. Default `copy`. |
 | `delete_old_files` | No | Default age-deletion behavior inherited by cleanup rules that set their override to `null`. Default `true`. |
 | `delete_excess_files` | No | Default limit/quota-deletion behavior inherited by cleanup rules. Default `true`. |
-| `max_total_size` | No | Maximum total size of the union of files covered by this destination's `cleanup_rules`; `null` disables the remote-wide size cap. |
+| `max_total_size` | No | Maximum total size of the union of files covered by this destination's `cleanup_rules`; `null` disables the remote-wide size cap. Uses the strict size syntax described below. |
 | `delete_to_trash` | No | Default delete mode inherited by cleanup rules. `false` requests direct/hard deletion where the backend has a supported rclone flag. |
-| `empty_trash` | No | When `true` and `delete_to_trash=true`, run `rclone cleanup` at the trash-cleanup stages. Default `true`. |
-| `buffer_size` | No | Per-upload rclone `--buffer-size`, for example `64M`; `null` leaves it unset. |
+| `empty_trash` | No | Allows `rclone cleanup` after script-managed trash activity. It does not by itself force trash cleanup. Planned hard-delete-only work is never treated as trash use, even when the upload-level `delete_to_trash` default is `true`. Default `true`. |
+| `buffer_size` | No | Per-upload rclone `--buffer-size`, for example `64M`; `null` leaves it unset. Uses the strict size syntax described below. |
 | `cleanup_rules` | No | List of relative managed paths and limits owned by this upload destination. |
 | `copy_options` | No | Extra rclone options appended to `copy`, `sync`, or `move`, subject to the restrictions below. |
 
@@ -285,12 +285,31 @@ Each cleanup rule belongs to exactly one upload destination and its `path` is re
 | --- | --- | --- |
 | `path` | Yes | Relative managed path. `/` means the complete upload root. |
 | `max_files` | No | Positive maximum file count; `null` disables this limit. |
-| `max_size` | No | Maximum size such as `50G`; `null` disables this limit. |
+| `max_size` | No | Maximum size such as `50G`; `null` disables this limit. Uses the strict size syntax described below. |
 | `delete_old_files` | No | `true`/`false` overrides the upload-level setting; `null` inherits it. |
 | `delete_excess_files` | No | `true`/`false` overrides the upload-level setting; `null` inherits it. |
 | `delete_to_trash` | No | `true`/`false` overrides the upload-level setting; `null` inherits it. |
 
 Duplicate normalized cleanup-rule paths inside the same upload destination are rejected.
+
+The exact same upload `remote_path` is also rejected. The error is deliberately reported as a **WARNING** and the application refuses to continue, because per-remote runtime state and destructive workers are keyed by that destination.
+
+### Strict size syntax
+
+Dedicated size settings parsed by the application (`max_total_size`, cleanup-rule `max_size`, and `buffer_size`) must be a whole number immediately followed by one of:
+
+```text
+K   KB
+M   MB
+G   GB
+T   TB
+```
+
+Examples: `1K`, `64MB`, `500G`, `1TB`. The units use binary multipliers (1024, 1024², and so on). Leading/trailing whitespace and lowercase unit letters are accepted after normalization, but malformed or ambiguous values are rejected. Values such as `G1`, `1G2`, `1.5M`, `1B`, `1GiB`, or `1 MB` are invalid.
+
+### `delete_min_age` validation
+
+`delete_min_age` is validated during config loading, including `--validate-config`, using the same parser used by cleanup planning. Supported forms include `off`, numeric seconds, fixed single-suffix values such as `31d`, `2w`, `1M`, or `1y`, Go-style time chains such as `2h45m`, and supported ISO/date timestamps. Invalid text is rejected before the lock file or any rclone command is started.
 
 `max_total_size` only covers files included by that destination's `cleanup_rules`. If `cleanup_rules` is empty, the managed union is empty and `max_total_size` has no managed files to count.
 
@@ -353,7 +372,16 @@ OneDrive     -> --onedrive-hard-delete
 
 Other backend types receive no backend-specific hard-delete flag from this application.
 
-`empty_trash=true` only causes `rclone cleanup` when `delete_to_trash=true`. When script-managed deletions are direct, the application does not run `rclone cleanup` just to empty unrelated backend trash.
+Trash and hard-delete decisions are preserved at the level where they are configured:
+
+- upload-level `delete_to_trash` is the default inherited by cleanup rules that use `null`;
+- a cleanup rule with an explicit `true` or `false` keeps that override in the combined delete plan;
+- mixed plans are split into separate trash-mode and hard-delete `rclone delete --files-from` commands;
+- a successful hard-delete command is never recorded as trash activity;
+- a successful trash-mode planned delete is recorded for that exact reservation/post-cleanup stage;
+- an actually started `rclone sync` with upload-level `delete_to_trash=true` is recorded as possible script-managed trash activity because sync can delete destination-only files.
+
+`empty_trash=true` permits `rclone cleanup` only when the relevant completed stage recorded script-managed trash activity. Therefore an upload whose default is `delete_to_trash=true` but whose actual cleanup deletions were all hard-delete overrides does **not** empty unrelated backend trash. Conversely, a cleanup rule that explicitly uses trash still enables trash cleanup even if the upload-level default is hard delete. `empty_trash=false` always skips `rclone cleanup`.
 
 If a backend reports that `rclone cleanup` is unsupported, that condition is treated as a supported skip rather than a failure.
 
@@ -399,7 +427,7 @@ Executes the combined delete plan generated from the in-memory snapshot.
 rclone cleanup REMOTE:
 ```
 
-Runs only when the destination is configured to delete to trash and empty that trash.
+Runs only when `empty_trash=true` and the relevant stage recorded script-managed trash activity: a successful trash-mode planned deletion, or for the post-upload stage an actually started trash-mode `sync`. Hard-delete-only work does not trigger this command.
 
 ### Upload
 
@@ -417,7 +445,7 @@ rclone move LOCAL_PATH REMOTE: [options]
 
 The configured lock file prevents two normal instances from running at once. The file contains the process PID and is removed on normal process exit through the registered cleanup handler, and also on handled SIGINT/SIGTERM.
 
-Combined delete plans are written below `delete_list_dir` with names derived from the phase, delete mode, and remote path. They are then passed to `rclone delete --files-from`.
+Combined delete plans are written below `delete_list_dir` with names derived from the phase, delete mode, and a readable remote-name fragment plus the full SHA-256 of the original `remote_path`. The hash prevents legacy filename collisions such as `a:b/c` versus `a_b:c`. The generated lists are then passed to `rclone delete --files-from`.
 
 ## Final result output
 
