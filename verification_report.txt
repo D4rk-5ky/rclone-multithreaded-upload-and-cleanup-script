@@ -1,168 +1,84 @@
-rclone-multithreaded-upload v0.0.25 verification report
-Date: 2026-09-11
+rclone-multithreaded-upload v0.0.26 verification report
+Date: 2026-09-16
 
 SCOPE
 -----
-This release adds a friendly config-level script/job name and optional final-run
-MQTT JSON result publication intended for Home Assistant automation. It preserves
-the v0.0.24 strict newest-to-oldest quota cutoff policy, complete-file uploads,
-hard-delete versus trash-mode distinctions, stage barriers, and post-upload
-cleanup/final verification behavior.
+This release fixes final MQTT result publishing when the installed Paho MQTT
+client uses legacy loop_start() return behavior. No cleanup, reservation,
+upload, quota, delete-mode, locking, or final-verification algorithm was
+intentionally changed.
 
-SCRIPT / JOB NAME
------------------
-A new optional root `script_name` identifies the configured cron/job instance.
-The default is `rclone-multithreaded-upload`. The configured value is printed in
-STARTUP SUMMARY and FINAL RUN RESULT and is included in MQTT JSON as
-`script_name`.
+MQTT LOOP_START COMPATIBILITY FIX
+---------------------------------
+The v0.0.25 publisher required client.loop_start() to return MQTT_ERR_SUCCESS
+(0). Some valid Paho implementations instead return None after successfully
+starting the network loop. That caused an otherwise successful completed run to
+log:
 
-Existing per-destination `upload_directories[].name` values are unchanged and
-remain the friendly names for individual remotes such as GDrive, Mega, or
-OneDrive. MQTT reports these separately in the `remotes` array and
-`failed_remotes` list.
+    MQTT network loop returned error code None
 
-MQTT FINAL RESULT
------------------
-MQTT is optional and disabled by default. Enabling it requires an MQTT broker
-host and the optional paho-mqtt Python dependency. The dependency is imported
-only when MQTT publishing is enabled.
+v0.0.26 accepts both successful conventions:
+- None, used by legacy Paho behavior;
+- MQTT_ERR_SUCCESS / 0, used by newer behavior.
 
-The final payload is schema-versioned and contains:
-- schema_version and event name;
-- script_name and application/application_version;
-- UTC timestamp;
-- overall status (`success` or `failure`) and boolean success;
-- process exit_code;
-- null error on success or combined captured stage error text on failure;
-- friendly failed_remotes;
-- one structured item per remote with name, remote_path, overall remote status,
-  reservation/upload/post_cleanup/final_quota stage states, and structured
-  stage errors.
+Explicit non-success/error return codes are still rejected. After the network
+loop starts, the publisher continues to wait for broker connection, publish the
+configured JSON payload, wait for publication completion, disconnect, and stop
+the loop.
 
-MQTT configuration supports host, port, topic, username/password, client ID,
-QoS 0/1/2, retain, keepalive, TLS, optional CA file, TLS-insecure override, and
-publish timeout. Publish topics are validated as concrete topic names and reject
-`+`/`#` subscription wildcards. Password values are never printed in startup
-summaries.
-
-The publisher starts the paho network loop, waits for the broker connection to
-be established, publishes the JSON, and waits for publication completion before
-disconnecting. Default QoS is 1 and default retain is false.
-
-MQTT TRANSPORT FAILURE POLICY
------------------------------
-MQTT is notification-only. If the upload/cleanup run has already completed and
-the broker is unavailable, paho-mqtt is missing, authentication fails, or the
-publish times out, the MQTT error is printed but the script's already-computed
-rclone/cleanup result and process exit code are not rewritten.
-
-A config-load failure cannot publish because a valid broker configuration has
-not been established. `--validate-config` never publishes. This release targets
-normal completed runs that reach FINAL RUN RESULT.
-
-HOME ASSISTANT EXAMPLE
-----------------------
-`home-assistant-mqtt-automation.example.yaml` subscribes to the example topic
-`homeassistant/rclone-upload/result` and uses `trigger.payload_json`.
-
-The automation:
-- reads `script_name`, `status`, `error`, `failed_remotes`, and remote names;
-- branches explicitly on `success` versus `failure`;
-- sends a Pushover notification and a `persistent_notification.create` action
-  for both success and failure;
-- includes the configured script name prominently in the notification title;
-- includes friendly remote names on success;
-- includes failed remote names plus captured error text on failure;
-- creates a persistent warning if an unexpected status is received.
-
-The Pushover action is intentionally named `notify.pushover` as an example and
-must be changed if the user's Home Assistant Pushover notify entity/action has a
-different name.
-
-OPTIONAL DEPENDENCY
+MQTT FAILURE POLICY
 -------------------
-`requirements-mqtt.txt` contains:
+MQTT remains notification-only. A broker/authentication/network/publish failure
+is reported but does not rewrite the already-computed backup/cleanup result or
+process exit code.
 
-    paho-mqtt>=2.0,<3
+CONFIGURATION
+-------------
+No configuration field was added, removed, or renamed. Existing JSON configs
+remain compatible. Both packaged config examples still include the complete
+current MQTT option set and all existing upload/cleanup options.
 
-The runtime code is compatible with the Paho 2.x callback API and has a fallback
-constructor path for clients without CallbackAPIVersion. The automated suite
-explicitly tests the Paho 2.x VERSION2 constructor path.
+DOCUMENTATION
+-------------
+- README.md documents current v0.0.26 behavior and all CLI flags.
+- VERSIONING.md contains the v0.0.26 release entry while preserving prior
+  release history.
+- commented_code_map.md explains the MQTT loop_start compatibility behavior and
+  continues to cover all checked functions/classes/methods.
 
-PRESERVED V0.0.24 QUOTA BEHAVIOR
---------------------------------
-Quota-managed file selection remains a strict contiguous newest-first prefix:
-- inspect eligible files newest to oldest;
-- select the next complete file only when it fits;
-- stop immediately at the first file that does not fit;
-- do not search older files for a smaller gap-filling candidate;
-- zero selected files is a successful upload no-op;
-- quota-managed transfers use frozen NUL-delimited --files-from0 lists;
-- no runtime --max-transfer or --cutoff-mode is used.
-
-Remote cleanup still frees complete remote files according to the existing
-oldest-first planner when reservation space is required. Hard/direct delete and
-trash/backend-default delete remain distinct, and existing empty_trash activity
-safeguards are preserved.
-
-CONFIGURATION / DOCUMENTATION
------------------------------
-- Version: 0.0.25.
-- Added root `script_name`.
-- Added optional root `mqtt` object.
-- Updated both packaged JSON example configs.
-- Added `requirements-mqtt.txt`.
-- Added `home-assistant-mqtt-automation.example.yaml`.
-- Updated README.md, VERSIONING.md, and commented_code_map.md.
-- Existing configs remain compatible because `script_name` has a default and
-  MQTT defaults to disabled.
-
-REGRESSION COVERAGE
--------------------
-The automated suite contains 41 tests. Relevant v0.0.25 coverage includes:
-- script_name and MQTT config loading;
-- startup summary hides MQTT passwords;
-- MQTT enabled without host is rejected;
-- MQTT QoS range validation;
-- null script_name/topic and wildcard publish topics are rejected clearly;
-- success payload shape and Home-Assistant-friendly fields;
-- failure payload contains friendly failed remote plus captured stage error;
-- disabled MQTT never loads the optional paho dependency;
-- Paho 2.x CallbackAPIVersion.VERSION2 client construction;
-- configured broker/port/credentials/client ID/topic/QoS/retain/keepalive and
-  publish timeout are passed to the MQTT client;
-- MQTT transport failure is reported without raising into the completed run;
-- all prior quota-selection, deletion-mode, stage-barrier, partial-upload, sync
-  safety, and fake-rclone end-to-end regressions remain passing.
-
-FINAL AUTOMATED CHECKS
-----------------------
-- --version: PASS, reports 0.0.25.
-- --help: PASS.
+AUTOMATED / LOCAL VERIFICATION
+------------------------------
+- Application version: PASS, reports 0.0.26.
+- --help: PASS; all four supported CLI flag groups are described.
 - --validate-config config.example.json: PASS.
 - --validate-config rclone-cctv-config.example.json: PASS.
 - JSON syntax for both packaged configs: PASS.
-- Home Assistant example YAML syntax/structure parse: PASS.
+- Home Assistant example YAML parse: PASS.
 - compileall: PASS for entry point, package, and tests.
-- package imports: PASS for all 22 package modules discovered by pkgutil.
-- commented_code_map.md AST coverage: PASS, all 121 checked functions/classes/
-  non-dunder class methods are represented.
-- unittest discovery: PASS, 41 tests.
-- fake-rclone normal end-to-end integration: PASS.
-- fake-rclone strict-cutoff end-to-end integration: PASS.
+- package imports: PASS for all 22 discovered package modules.
+- commented_code_map.md AST name coverage: PASS for 121 checked
+  functions/classes/non-dunder class methods.
+- unittest discovery: PASS, 42 tests.
+- New legacy-Paho regression: PASS; loop_start() returning None proceeds through
+  publish and clean loop shutdown.
+- Existing modern-Paho regression: PASS; loop_start() returning 0 remains
+  accepted.
+- Existing fake-rclone integration tests: PASS.
+
+PACKAGING VERIFICATION
+----------------------
+The release is packaged from the complete original project tree. Python cache
+files, bytecode, build cache, and temporary files are removed before packaging.
+The final file manifest is compared with the original zip so required original
+files are not accidentally dropped. SHA256SUMS is regenerated for packaged
+project files.
 
 NOT FULLY TESTED
 ----------------
-No destructive test was run against real Google Drive, MEGA, OneDrive, crypt
-wrappers, or other live cloud remotes. No live MQTT broker or live Home
-Assistant instance was available in the local test container, and paho-mqtt
-could not be installed there because the container has no Internet access.
-MQTT behavior was tested with deterministic fake clients plus current Paho API
-documentation review. Home Assistant YAML was syntax/structure parsed and its
-MQTT JSON trigger, persistent-notification action, and Pushover action patterns
-were checked against current Home Assistant documentation.
-
-Provider-specific trash behavior, pagination, throttling/rate limits,
-permissions, network interruptions, concurrent live remote changes, broker
-ACL/TLS configuration, and real long-running transfers remain outside the local
-automated test environment.
+No destructive end-to-end test was run against real Google Drive, MEGA,
+OneDrive, pCloud, crypt wrappers, or other live remotes. No live MQTT broker or
+Home Assistant instance was used from the sandbox, so broker authentication,
+ACLs, TLS, real network interruption behavior, and actual Home Assistant
+receipt remain outside local verification. The MQTT compatibility behavior was
+verified with deterministic fake Paho clients that exercise both loop_start()
+success conventions.

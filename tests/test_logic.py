@@ -471,6 +471,71 @@ class MqttResultTests(unittest.TestCase):
             self.assertEqual(publish_call[3:], (2, True))
             self.assertEqual(client.info.wait_timeout, 7)
 
+    def test_publish_accepts_legacy_paho_loop_start_none(self):
+        class FakePublishInfo:
+            rc = 0
+
+            def __init__(self):
+                self.published = False
+
+            def wait_for_publish(self, timeout=None):
+                self.published = True
+
+            def is_published(self):
+                return self.published
+
+        class FakeClient:
+            def __init__(self):
+                self.calls = []
+                self.info = FakePublishInfo()
+
+            def connect(self, host, port, keepalive):
+                self.calls.append(("connect", host, port, keepalive))
+                return 0
+
+            def loop_start(self):
+                self.calls.append(("loop_start",))
+                return None
+
+            def is_connected(self):
+                return True
+
+            def publish(self, topic, payload, qos, retain):
+                self.calls.append(("publish", topic, payload, qos, retain))
+                return self.info
+
+            def disconnect(self):
+                self.calls.append(("disconnect",))
+
+            def loop_stop(self):
+                self.calls.append(("loop_stop",))
+
+        class FakeMqtt:
+            MQTT_ERR_SUCCESS = 0
+
+            def __init__(self, client):
+                self.client = client
+
+            def Client(self, client_id=""):
+                return self.client
+
+        with StateSnapshot():
+            STATE.mqtt = MqttConfig(
+                enabled=True,
+                host="mqtt.local",
+                topic="homeassistant/rclone-upload/result",
+            )
+            client = FakeClient()
+            with patch(
+                "rclone_multithreaded_upload.mqtt._load_paho_mqtt",
+                return_value=FakeMqtt(client),
+            ):
+                publish_result_payload({"status": "success"})
+
+            self.assertIn(("loop_start",), client.calls)
+            self.assertTrue(any(call[0] == "publish" for call in client.calls))
+            self.assertIn(("loop_stop",), client.calls)
+
     def test_publish_failure_is_reported_but_does_not_raise(self):
         with StateSnapshot():
             STATE.script_name = "Frigate CCTV Upload"

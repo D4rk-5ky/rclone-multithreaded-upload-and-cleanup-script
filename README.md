@@ -33,7 +33,7 @@ Always test with disposable data or a test remote first, run `--validate-config`
 
 # rclone-multithreaded-upload
 
-Version 0.0.25
+Version 0.0.26
 
 `rclone-multithreaded-upload` uploads one or more local directories to independent rclone destinations while enforcing configured age, file-count, folder-size, and managed remote-size limits.
 
@@ -258,6 +258,8 @@ Start from `config.example.json` or the CCTV-oriented `rclone-cctv-config.exampl
 
 MQTT publishing is optional and disabled unless `mqtt.enabled=true`. When enabled, the application publishes exactly one JSON result after the normal run reaches its final result. The MQTT transport is notification-only: a broker or publish failure is printed as an error but does **not** change the rclone/cleanup run's exit status.
 
+The publisher is compatible with both Paho network-loop success conventions: older Paho behavior may return `None` from `client.loop_start()`, while newer releases return `MQTT_ERR_SUCCESS` (`0`). Both are treated as success; explicit non-success codes remain errors.
+
 Install the optional dependency only on systems that enable MQTT:
 
 ```bash
@@ -311,7 +313,7 @@ The result payload is intentionally stable and easy for Home Assistant to consum
   "event": "rclone_multithreaded_upload_result",
   "script_name": "Frigate CCTV Upload",
   "application": "rclone-multithreaded-upload",
-  "application_version": "0.0.25",
+  "application_version": "0.0.26",
   "timestamp": "2026-09-11T08:45:00Z",
   "status": "success",
   "success": true,

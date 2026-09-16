@@ -130,7 +130,10 @@ def publish_result_payload(payload: dict) -> None:
         connected = True
 
         loop_rc = client.loop_start()
-        if loop_rc != mqtt_success:
+        # paho-mqtt 1.x returns None on a successful loop_start(), while
+        # newer releases return MQTT_ERR_SUCCESS. Accept both success forms
+        # and still reject explicit non-zero/error return codes.
+        if loop_rc is not None and loop_rc != mqtt_success:
             raise RuntimeError(f"MQTT network loop returned error code {loop_rc}")
         loop_started = True
 

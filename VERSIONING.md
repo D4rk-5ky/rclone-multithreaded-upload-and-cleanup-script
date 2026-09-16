@@ -10,6 +10,31 @@ Rollover rule:
 
 `0.0.100` is not used.
 
+## 0.0.26
+
+MQTT legacy `loop_start()` compatibility fix release.
+
+### Code
+
+- Incremented the application version from `0.0.25` to `0.0.26`.
+- Fixed final MQTT result publishing for Paho MQTT implementations where a successful `client.loop_start()` returns `None` instead of `MQTT_ERR_SUCCESS` / `0`.
+- The MQTT publisher now accepts both documented success forms: `None` for legacy behavior and `MQTT_ERR_SUCCESS` for newer behavior.
+- Explicit non-success return codes are still treated as MQTT transport failures.
+- Preserved MQTT as notification-only: publication failure still cannot rewrite a successful backup/cleanup result or process exit code.
+- No cleanup, reservation, upload, quota, delete-mode, locking, or final-verification behavior was changed.
+
+### Documentation and configuration
+
+- Updated `README.md` MQTT behavior documentation to explain compatibility with both Paho return conventions.
+- Updated `commented_code_map.md` to document why `publish_result_payload()` accepts both `None` and `MQTT_ERR_SUCCESS` from `loop_start()`.
+- No configuration fields were added, removed, or renamed. Existing `config.example.json`, `rclone-cctv-config.example.json`, and user configs remain compatible.
+
+### Tests and verification
+
+- Added a regression test that simulates legacy Paho behavior where `loop_start()` returns `None` and verifies that publishing continues, completes, and stops the network loop cleanly.
+- Retained the existing MQTT publish-path test for the newer explicit `0` / `MQTT_ERR_SUCCESS` return convention.
+- Full verification results for this packaged release are recorded in `verification_report.txt`.
+
 ## 0.0.25
 
 Named-run and optional MQTT result notification release.

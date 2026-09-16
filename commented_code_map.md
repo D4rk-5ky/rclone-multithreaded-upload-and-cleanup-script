@@ -782,9 +782,9 @@ Why: optional MQTT support tolerates both major paho API generations without cha
 
 ### `publish_result_payload(payload)`
 
-Applies configured authentication/TLS, connects to the broker, publishes compact JSON with configured QoS/retain, waits for completion, then disconnects/stops the network loop.
+Applies configured authentication/TLS, connects to the broker, starts the Paho network loop, publishes compact JSON with configured QoS/retain, waits for completion, then disconnects/stops the network loop. A successful `loop_start()` may return `None` on older Paho behavior or `MQTT_ERR_SUCCESS` / `0` on newer behavior; both are accepted, while explicit error codes still fail publication.
 
-Why: the script does not report publication success merely because a payload was queued locally.
+Why: the script does not report publication success merely because a payload was queued locally, and it preserves compatibility with both Paho network-loop return conventions.
 
 ### `publish_final_result(exit_code)`
 
