@@ -138,3 +138,9 @@ class RemoteRunResult:
     post_cleanup_trash_deleted: bool = False
     steps: dict[str, StepRunResult] = field(default_factory=dict)
     stderr_tail: str = ""
+    transferred_bytes: int | None = 0
+    bytes_per_second: float | None = 0.0
+    transfer_started: float | None = None
+    transfer_finished: float | None = None
+    transfer_sample_time: float | None = None
+    transfer_sample_elapsed: float | None = None

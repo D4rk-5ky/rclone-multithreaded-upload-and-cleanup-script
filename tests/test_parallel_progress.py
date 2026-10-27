@@ -66,7 +66,8 @@ class ParallelProgressTests(unittest.TestCase):
         self.assertEqual([row['total'] for row in rows], [7, 12, 16])
         self.assertEqual(snapshot['total'], 35)
         self.assertEqual(snapshot['completed'], 0)
-        self.assertEqual(snapshot['details']['total_stages'], 12)
+        self.assertNotIn('total_stages', snapshot['details'])
+        self.assertTrue(all('stages' not in row for row in rows))
         self.assertEqual(rows[2]['steps'][2]['kind'], 'cleanup')
         self.assertEqual(len([s for s in rows[2]['steps'] if '_rule:' in s['id']]), 4)
         # A returned snapshot is detached from the state maintained by workers.
@@ -129,7 +130,7 @@ class ParallelProgressTests(unittest.TestCase):
                     for name, count in [('OneDrive', 7), ('GDrive', 12), ('Mega', 16)]:
                         self.assertIn('#### ' + name + ' — RUNNING', text)
                         self.assertIn(f'**Progress:** 0 / {count} steps settled', text)
-                        self.assertIn(f'| {name} | Upload: Upload files (copy) | 0 / {count} | 0.0% | RUNNING |', text)
+                        self.assertIn(f'| {name} | Upload: Upload files (copy) | 0 / {count} | 0.0% | 0 B | 0 B/s | RUNNING |', text)
                     self.assertEqual(text.count('| 🟢 RUNNING |'), 3)
                     self.assertIn('| Step | Phase | State | Detail |\n|:---|:---|:---|:---|\n| Pre-upload remote snapshot', text)
                 release[uploads[0].remote_path].set()
@@ -207,7 +208,7 @@ class ParallelProgressTests(unittest.TestCase):
                 self.assertEqual(snapshot['total'], sum([7, 12, 16, 7][:count]))
                 self.assertEqual(text.count(' | Waiting for next phase | '), count)
                 for row in rows:
-                    self.assertIn(f'| {row["name"]} | Waiting for next phase | 0 / {row["total"]} | 0.0% | PENDING |', text)
+                    self.assertIn(f'| {row["name"]} | Waiting for next phase | 0 / {row["total"]} | 0.0% | 0 B | 0 B/s | PENDING |', text)
                 for upload in uploads[count:]:
                     self.assertNotIn('| ' + upload.name + ' |', text)
 
@@ -221,17 +222,12 @@ class ParallelProgressTests(unittest.TestCase):
         self.assertEqual(snapshot['completed'], snapshot['total'])
         self.assertTrue(all(row['activity'] == 'Finished' for row in snapshot['details']['remote_jobs']))
 
-    def test_overview_accepts_older_details_and_escapes_configured_names(self):
+    def test_overview_escapes_configured_names_with_current_details(self):
         with step('remote:a', 'upload'):
             snapshot = STATE.live_preview.snapshot()
-        snapshot['details'].pop('activity')
-        snapshot['details'].pop('activity_counts')
         snapshot['details']['remote_jobs'][0]['name'] = 'OneDrive | <backup>\nPrimary'
-        for row in snapshot['details']['remote_jobs']:
-            row.pop('activity')
-            row.pop('activity_counts')
         text = self._render_snapshot(snapshot)
-        self.assertIn('| OneDrive &#124; &lt;backup&gt; Primary | Active: Upload files (copy) | 0 / 7', text)
+        self.assertIn('| OneDrive &#124; &lt;backup&gt; Primary | Upload: Upload files (copy) | 0 / 7', text)
         self.assertIn('| Mega | Waiting for next phase | 0 / 16', text)
 
     def test_failed_preparation_skips_its_dependents_but_leaves_post_cleanup_available(self):

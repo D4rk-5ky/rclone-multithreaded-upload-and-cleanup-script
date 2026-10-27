@@ -74,9 +74,9 @@ class CardTests(unittest.TestCase):
             live.update(total=4, completed=3, current_item='pool/current', phase='sending',
                         transferred_bytes=1073741824, bytes_per_second=1048576)
         if outcome == 'failure':
-            live.record_dataset('success', source='pool/a', destination='backup/a')
-            live.record_dataset('failure', source='pool/b', destination='backup/b', reason='Out of space')
-            live.record_dataset('skipped', source='pool/c', destination='backup/c', reason='Already present')
+            live.update(successful_datasets=[{'source': 'pool/a', 'destination': 'backup/a'}],
+                        failed_datasets=[{'source': 'pool/b', 'destination': 'backup/b', 'reason': 'Out of space'}],
+                        skipped_datasets=[{'source': 'pool/c', 'destination': 'backup/c', 'reason': 'Already present'}])
             live.finish(12, error='Receive failed', stderr='cannot receive: out of space <unsafe>')
         elif outcome == 'success':
             live.update(total=4, completed=4)
@@ -128,7 +128,7 @@ class CardTests(unittest.TestCase):
         self.assertEqual(self.card['type'], 'markdown')
         self.assertIn("{% set manufacturer = 'rclone-multithreaded-upload' %}", self.content)
         self.assertIn("live_preview_role", self.content)
-        self.assertIn('| Destination | Activity / current step | Settled steps | Progress | State |', self.content)
+        self.assertIn('| Destination | Activity / current step | Settled steps | Progress | Transferred | Speed | State |', self.content)
         self.env.parse(self.content)
 
     def test_manufacturer_filter_and_custom_name(self):
@@ -157,7 +157,7 @@ class CardTests(unittest.TestCase):
         self.assertIn('75.0%', text)
         self.assertIn('**Items:** 3 / 4 completed', text)
         self.assertIn('1.00 GiB', text)
-        self.assertIn('**Current speed:** 1.00 MiB/s', text)
+        self.assertIn('**Combined speed:** 1.00 MiB/s', text)
 
     def test_expired_terminal_state_uses_retained_result(self):
         state = self.state('success')
@@ -260,7 +260,7 @@ class CardTests(unittest.TestCase):
                 self.assertIn('— FAILURE' if failed else '— SUCCESS', rendered)
                 self.assertIn('**Steps:** 10 / 10 settled', rendered)
                 self.assertIn('/srv/cameras → cloud:archive', rendered)
-                self.assertIn('**Transferred:** Unknown', rendered)
+                self.assertIn('**Transferred:** 0 B', rendered)
                 self.assertIn('**Exit code:** 1' if failed else '**Exit code:** 0', rendered)
                 live.close()
 

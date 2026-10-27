@@ -5,10 +5,12 @@ from contextvars import ContextVar
 from datetime import datetime, timezone
 from functools import wraps
 from inspect import signature
+import time
 
 from .models import StepRunResult
 from .output import print_error
 from .state import STATE
+from .transfer_stats import transfer_snapshot
 
 STAGES = ("reservation", "upload", "post_cleanup", "final_quota")
 TERMINAL = {"SUCCESS", "FAILED", "SKIPPED", "INTERRUPTED"}
@@ -192,10 +194,10 @@ def remote_progress(result, source: str = "") -> dict:
             "activity_counts": activity_counts,
             "activity": "; ".join(activity_counts) or ("Waiting for next phase" if done < len(tasks) else "Finished"),
             "steps": tasks, "cleanup_jobs": cleanup_jobs,
-            "stages": {stage: getattr(result, stage).status for stage in STAGES},
             "stderr": sanitize(result.stderr_tail),
             "error": sanitize("\n".join(error for stage in STAGES for error in getattr(result, stage).errors)),
-            "has_failures": bool(failed or "FAILED" in statuses)}
+            "has_failures": bool(failed or "FAILED" in statuses),
+            **transfer_snapshot(result, time.monotonic())}
 
 
 def progress_snapshot_locked() -> dict:
@@ -207,6 +209,10 @@ def progress_snapshot_locked() -> dict:
                        if any(label in row["activity_counts"] for row in rows)}
     unfinished = any(row["completed"] < row["total"] for row in rows)
     return {"schema_version": 1, "unit": "steps", "destination_count": len(rows),
+            "transferred_bytes": (sum(row["transferred_bytes"] for row in rows)
+                                  if all(row["transferred_bytes"] is not None for row in rows) else None),
+            "bytes_per_second": (sum(row["bytes_per_second"] for row in rows)
+                                 if all(row["bytes_per_second"] is not None for row in rows) else None),
             "activity_counts": activity_counts,
             "activity": "; ".join(f"{label}: {count}" for label, count in activity_counts.items())
                         or ("Waiting for next phase" if unfinished else "Finished" if rows else "Preparing"),
@@ -214,6 +220,4 @@ def progress_snapshot_locked() -> dict:
             "completed": sum(row["completed"] for row in rows), "total": sum(row["total"] for row in rows),
             "running": sum(row["running"] for row in rows), "failed": sum(row["failed"] for row in rows),
             "skipped": sum(row["skipped"] for row in rows),
-            "completed_stages": sum(getattr(result, stage).status != "PENDING"
-                                    for result in STATE.run_results.values() for stage in STAGES),
-            "total_stages": len(rows) * len(STAGES), "remote_jobs": rows}
+            "remote_jobs": rows}

@@ -156,11 +156,11 @@ class LifecycleTests(unittest.TestCase):
                         self.assertEqual(final['payload']['status'], 'success')
                         self.assertEqual(final['payload']['completed'], final['payload']['total'])
                         self.assertEqual(final['payload']['total'], 10)
-                        self.assertEqual(final['payload']['details']['completed_stages'], 4)
+                        self.assertNotIn('completed_stages', final['payload']['details'])
                         self.assertEqual(final['payload']['progress_percent'], 100)
                         self.assertEqual(final['payload']['successful_dataset_count'], 1)
-                        self.assertIsNone(final['payload']['transferred_bytes'])
-                        self.assertIsNone(final['payload']['bytes_per_second'])
+                        self.assertEqual(final['payload']['transferred_bytes'],0)
+                        self.assertEqual(final['payload']['bytes_per_second'],0)
                         self.assertTrue(all(not row['retain'] for row in self.messages if row['topic'].endswith('/state')))
                         self.assertEqual(len([row for row in self.messages if row['topic'].endswith('/config')]), 14)
                     if completion:
@@ -234,7 +234,7 @@ class ProgressTests(unittest.TestCase):
                     job.result()
             self.assertEqual(counts, sorted(counts))
             self.assertEqual(counts[-1], 0)  # Summary events do not invent observed work.
-            self.assertEqual(STATE.live_preview.snapshot()['details']['completed_stages'], 48)
+            self.assertNotIn('completed_stages', STATE.live_preview.snapshot()['details'])
             self.assertEqual(STATE.live_preview.snapshot()['successful_dataset_count'], 12)
 
     def test_diagnostics_are_bounded_and_redacted_in_both_channels(self):

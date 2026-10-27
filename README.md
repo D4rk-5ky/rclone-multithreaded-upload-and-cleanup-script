@@ -1,6 +1,6 @@
 # rclone-multithreaded-upload
 
-Version 0.0.35
+Version 0.0.37
 
 `rclone-multithreaded-upload` uploads one or more local directories to independent rclone destinations while enforcing configured age, file-count, folder-size, and managed remote-size limits.
 
@@ -371,9 +371,7 @@ Each cleanup rule belongs to exactly one upload destination and its `path` is re
 | `delete_excess_files` | No | `true`/`false` overrides the upload-level setting; `null` inherits it. |
 | `delete_to_trash` | No | `true`/`false` overrides the upload-level setting; `null` inherits it. |
 
-Duplicate normalized cleanup-rule paths inside the same upload destination are rejected.
-
-The exact same upload `remote_path` is also rejected. The error is deliberately reported as a **WARNING** and the application refuses to continue, because per-remote runtime state and destructive workers are keyed by that destination.
+Duplicate overridden cleanup-rule paths inside the same upload destination are rejected.
 
 ### Strict size syntax
 
@@ -529,7 +527,7 @@ rclone move LOCAL_PATH REMOTE: [options]
 | `sync` | Make the destination match the selected source using rclone sync behavior, including destination deletions where applicable. |
 | `move` | Transfer selected local files and allow rclone to remove successfully moved source files. |
 
-For quota-managed uploads, source-selection filters are first applied to the frozen local snapshot, then replaced on the transfer command by the exact generated `--files-from0` list. Non-filter options such as stats and transfer concurrency remain in place.
+For quota-managed uploads, source-selection filters are first applied to the frozen local snapshot, then replaced on the transfer command by the exact generated `--files-from0` list. Transfer options retain their existing behavior. With live preview enabled, the app owns statistics/logging display flags to read numeric JSON counters once per second.
 
 `sync` can delete destination files that are absent from the selected source according to normal rclone sync semantics. For quota-managed `sync`, `--delete-excluded` is rejected during config validation because over-budget files are intentionally excluded from the generated list and must not be deleted from the destination merely because they were skipped for that run.
 
@@ -562,7 +560,7 @@ Final completion reporting is attempted after runtime success/failure, unexpecte
 
 `home-assistant-mqtt-automation.example.yaml` retains Pushover and persistent notifications and checks consistency of the template's status, boolean success and integer exit code. Replace `notify.pushover` with your configured action, or remove those actions. Match its exact topic to `completion.topic`. Pushover titles/messages use the supplied template's bounded formatting, with metadata and the latest stderr tail. If shortened, the message says so; the full completion payload and the persistent HA failure notification retain the complete report diagnostics.
 
-The live card counts settled workflow steps across every configured destination, with independent per-destination counts and current operations. Its topics and enable switch remain separate from completion notifications; byte totals/speed stay unknown.
+The live card counts settled workflow steps across every configured destination, with independent per-destination counts and current operations. Its topics and enable switch remain separate from completion notifications; each destination exposes measured bytes/speed from its own rclone process, with combined totals at the top.
 
 For a card that fills its fields and adds matching jobs automatically, paste `manufacturer-live-preview-card.yaml` as a manual Markdown card. Its selector defaults to manufacturer `rclone-multithreaded-upload`. No entity IDs need to be edited. The live config defaults to the same manufacturer, including when upgrading an existing config that omits this new field. Run a configured job with live publishing and discovery enabled so HA receives the updated discovery definitions and full state attributes. The per-job device name still comes from `script_name`.
 
@@ -579,7 +577,7 @@ For a card that fills its fields and adds matching jobs automatically, paste `ma
 
 JSON payload files are synthetic reference data, not runtime config. Only the two config examples are intended to be copied/edited into `config.json`.
 
-For the custom manufacturer `rclone-multithreaded-upload-ubuntu-zfs-raid-import-test`, edit the selector near the top of `manufacturer-live-preview-card.yaml` to the exact same value as `live.manufacturer`. No custom duplicate card or per-destination entity IDs are required. An already installed card with the matching selector continues to work.
+For the custom manufacturer `rclone-multithreaded-upload-ubuntu-zfs-raid-import-test`, edit the selector near the top of `manufacturer-live-preview-card.yaml` to the exact same value as `live.manufacturer`. No custom duplicate card or per-destination entity IDs are required. Use the delivered card with the current app; its activity fields and status values follow the current live packet format.
 
 Adding/removing `upload_directories` config entries automatically changes the live table. Each entry's `name` supplies its destination label. Overall progress is the sum of their independent step plans, with Upload, Cleanup and Trash cleanup distinguished. Detailed cleanup-rule views share the same steps and are not counted twice.
 
@@ -594,3 +592,13 @@ Ctrl-C (`SIGINT`), `kill PID` (`SIGTERM`), SIGHUP and SIGQUIT request cancellati
 Killing either displayed app process is covered: if the job is killed, the supervisor removes its remaining children; if the supervisor is killed with `kill -9`, the job's pipe watchdog kills the isolated group. SIGKILL cannot run Python finalization, so final notifications and lock removal cannot be guaranteed in that case. The supervisor also removes lingering group members on normal exit. Unrelated processes and other runs are outside this group.
 
 See [PROCESS_LIFECYCLE.md](PROCESS_LIFECYCLE.md) for signal commands, exit codes, verification and scope. Workflow-step progress describes work that actually ran; stopping a transfer or deletion does not undo completed changes.
+
+## Transfer bytes and speed in the live card
+
+With `live.enabled=true`, upload commands automatically emit JSON statistics every second. Each destination row and detail section shows its own transferred bytes, current reported speed and upload average. The top overall section shows combined transferred bytes, combined current speed (sum of active destination rates), combined average speed (combined bytes divided by elapsed run time), and runtime. There is no separate speed block below the destination previews. Update both the app and `manufacturer-live-preview-card.yaml` to use this layout.
+
+The data comes from rclone's numeric `stats.bytes` and `stats.speed`, including all concurrent file transfers/streams inside that destination's rclone process. Repeated cumulative samples replace counters rather than being added again. Finished destinations keep their transferred amount and upload average while current speed becomes zero. A destination waiting to start has zero transferred; after launch, unknown measurements remain unknown until a valid sample arrives. Speeds delayed by more than three seconds become unknown at the next publish/heartbeat refresh. Forced interruption may omit bytes after the last available sample.
+
+The run average includes preparation, waits and cleanup time; each destination's upload average uses only its own process lifetime and freezes when it exits. This is aggregate throughput, not the arithmetic mean of worker speeds. Copying the same file to three destinations counts the three separate transfers. Cleanup/snapshot API traffic is not treated as uploaded file bytes. Workflow-step percentages keep their current meaning.
+
+While live preview is enabled, the app controls `--use-json-log`, `--stats=1s`, `--stats-log-level=NOTICE`, `--log-level=NOTICE`, `--progress=false`, `--quiet=false`, `--log-file=` and `--syslog=false`. Explicit final flag values override statistics/verbosity/progress display settings for that command; existing option tokens/arguments are preserved; transfer filters and concurrency are preserved. Remove `--log-file`, `--syslog` or `--syslog-facility` from `copy_options` when enabling live preview, since they redirect the statistics stream. These conflicts fail config validation before a lock or rclone command. Without live preview, the app preserves configured rclone logging options; measured values are available only if that command emits JSON stats itself.

@@ -86,9 +86,6 @@
       "copy_options": [
         "--max-age",
         "12h",
-        "--stats",
-        "10s",
-        "--stats-one-line",
         "--transfers",
         "4",
         "--exclude",
@@ -118,7 +115,6 @@
       ],
       "copy_options": [
         "--max-age=24h",
-        "--stats=30s",
         "--transfers=2"
       ]
     },
@@ -145,9 +141,7 @@
       ],
       "copy_options": [
         "--min-age",
-        "5m",
-        "--stats",
-        "15s"
+        "5m"
       ]
     }
   ]

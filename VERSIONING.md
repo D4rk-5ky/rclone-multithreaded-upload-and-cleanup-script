@@ -10,6 +10,32 @@ Rollover rule:
 
 `0.0.100` is not used.
 
+## 0.0.37
+
+Owner-requested second cleanup after per-destination transfer reporting.
+
+- Incremented 0.0.36 to 0.0.37; preserved every original and previous-release file and both complete current config examples. Existing legacy mqtt config/option converters and aliases remain absent, and obsolete/unknown config keys remain rejected. No active configuration option was removed in this pass.
+- Replaced six repeated future-submission/join/error-handling blocks with run_remote_workers. Each phase retains its original candidate selection, worker limit, complete barrier and prerequisite skip rules. Ordinary exceptions stay isolated per destination; cancellation still propagates through StopAwareExecutor. Reused the shared STAGES tuple for completion/result classification instead of repeating literals.
+- Removed unused template-only LivePreview.record_dataset, completion _dataset_list and its planned/skipped/failed dataset keyword arguments, and PublishResult.sent. Current rclone code uses atomic bulk LivePreview.update, validated completion extra metadata and PublishResult.status. Standard JSON fields and optional-array validation remain intact.
+- Removed old four-stage live compatibility counters completed_stages/total_stages and duplicate live remote_jobs[].stages; detailed step/activity/transfer fields remain the progress source. Internal safety stages, console results and completion remotes[].stages remain intact.
+- Removed HA card support for the historical failed spelling and old activity-less destination packets. Current manufacturer/role matching, first-state lookup, expired-heartbeat handling and null-measurement behavior remain. Use the shipped app/card together.
+- Updated README to current usage, MQTT/live field guides, VERSIONING and every affected/new code-map entry. Regenerated the single success/failure and live packet examples; preserved the exact owner disclaimer and lean example inventory.
+- Retargeted tests to current APIs, retained wire-array/detachment/validation coverage and added all-six-stage crash isolation plus cancellation/empty-barrier checks. Compared old/new orchestration across 648 deterministic three-destination scenarios including success, false/None returns and exceptions. The full offline suite, compile/CLI/config/card checks and ZIP manifest/hash checks are recorded in verification_report.txt.
+- Before/after runtime Python: 4,683 -> 4,546 physical lines; 3,868 -> 3,739 code lines (129 fewer). Tests: 3,770 -> 3,828 physical lines; 3,389 -> 3,441 code lines. All Python: 8,453 -> 8,374 physical and 7,257 -> 7,180 code lines. Including both HA YAML files: 8,803 -> 8,724 physical code-file lines (79 fewer). No tests or required files were dropped to obtain the reduction. Counting methodology and full data are in RELEASE_MANIFEST.json.
+
+## 0.0.36
+
+Measured per-destination transfer bytes/rates and combined top-level metrics.
+
+- Incremented 0.0.35 to 0.0.36. Added transfer_stats.py for owned live JSON statistics flags, strict numeric cumulative-sample validation, per-process start/finish/duration tracking, non-duplicating counters and stale-speed handling.
+- Upload streams parse each rclone process's numeric bytes/speed/elapsedTime. Healthy stats do not fill failure diagnostics; ordinary output and errors retain existing handling. Process exit freezes its duration/average and zeros its current rate, including failures/interrupts.
+- Added per-remote metrics to the existing locked progress snapshot and summed them into standard live transferred_bytes/bytes_per_second and detailed/completion progress. Pending/unlaunched destinations contribute zero; launched unknown metrics remain null. Current totals do not include a finished worker's old speed.
+- Live upload commands own one-second JSON stats and display/logging flags, including environment log redirection overrides; live-enabled configs reject explicit redirecting log-file/syslog options. Non-live logging options, source filters, transfer concurrency, exact file lists and all deletion/lock/barrier/process-supervision behavior are retained.
+- Added an optional before_publish local refresh callback to the live module, called outside its lock. This refreshes metrics/staleness before heartbeat packets without adding a new thread/process or network work on the transfer path. Standard wire fields/discovery/manufacturer identity remain unchanged.
+- Moved aggregate bytes/combined speed/run average/runtime to the overall card block at the top, added per-destination bytes/current speed/average, and removed the former bottom metrics block. The run average is total bytes divided by job runtime; per-worker averages use that process's lifetime. Added shared unit-formatting Jinja macros.
+- Removed redundant stats display flags from config example values while preserving all canonical keys; regenerated the single success/failure and live packet files with measured sample counters. Updated current usage and every affected/new function/command explanation, preserving the owner disclaimer and lean package inventory.
+- Added offline metric/flag/invalid/stale/heartbeat/stream/card and full three-process CLI + fake Paho tests, including finishing one destination while others continue. Existing signal/shutdown and operation safety tests remain. Real broker/cloud/rclone binary operation remains untested where unavailable; package verification records exact results and limits.
+
 ## 0.0.35
 
 Owner-requested removal of obsolete compatibility code and redundant helpers.
@@ -429,7 +455,7 @@ Three-snapshot remote planner and request-reduction release.
 - Cleanup decisions immediately remove selected paths from the working snapshot so later rules see simulated post-delete state.
 - Pre-upload cleanup and upload reservation use the same pre-upload snapshot and normally one combined delete command per delete mode.
 - Removed the repeated ten-pass reservation listing loop.
-- Added a concurrent single-flight local-size cache keyed by normalized local path plus source-selection filter options.
+- Added a concurrent single-flight local-size cache keyed by overridden local path plus source-selection filter options.
 - Identical local source/filter combinations now run `rclone size --json` once and share the result between remote pipelines.
 - Post-upload age, cleanup-rule, and `max_total_size` planning now use one post-upload snapshot per remote.
 - Final cleanup-rule and `max_total_size` verification now use one final snapshot per remote.

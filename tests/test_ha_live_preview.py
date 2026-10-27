@@ -183,11 +183,13 @@ class LiveTests(unittest.TestCase):
             self.assertEqual(state[label + '_datasets'], [])
             self.assertEqual(state[label + '_dataset_count'], 0)
 
-    def test_dataset_retries_replace_previous_outcome_and_keep_reasons(self):
+    def test_bulk_dataset_reclassification_replaces_counts_and_keeps_reasons(self):
         live = self.live()
-        live.record_dataset('failure', source='pool/a', destination='backup/a', reason='Receive failed')
-        live.record_dataset('skipped', source='pool/b', destination='backup/b', reason='Already present')
-        live.record_dataset('success', source='pool/a', destination='backup/a')
+        skipped = [{'source': 'pool/b', 'destination': 'backup/b', 'reason': 'Already present'}]
+        live.update(failed_datasets=[{'source': 'pool/a', 'destination': 'backup/a', 'reason': 'Receive failed'}],
+                    skipped_datasets=skipped)
+        self.assertEqual(live.snapshot()['failed_dataset_count'], 1)
+        live.update(failed_datasets=[], successful_datasets=[{'source': 'pool/a', 'destination': 'backup/a'}])
         state = live.snapshot()
         self.assertEqual(state['successful_dataset_count'], 1)
         self.assertEqual(state['failed_dataset_count'], 0)
@@ -208,7 +210,7 @@ class LiveTests(unittest.TestCase):
     def test_failed_datasets_prevent_zero_code_live_success(self):
         live = self.live()
         live.update(total=1, completed=1)
-        live.record_dataset('failure', source='pool/a', reason='Failed')
+        live.update(failed_datasets=[{'source': 'pool/a', 'reason': 'Failed'}])
         live.finish(0)
         self.assertEqual(live.snapshot()['status'], 'incomplete')
         self.assertIs(live.snapshot()['success'], False)
@@ -218,10 +220,9 @@ class LiveTests(unittest.TestCase):
         for rows in ('text', [None], [{'reason': float('nan')}], None):
             with self.subTest(rows=rows), self.assertRaises(ValueError):
                 live.update(failed_datasets=rows)
-        with self.assertRaises(ValueError):
-            live.record_dataset('completed', source='pool/a')
+        self.assertFalse(hasattr(live, 'record_dataset'))
         live.finish(0)
-        self.assertFalse(live.record_dataset('success', source='pool/a'))
+        self.assertFalse(live.update(successful_datasets=[{'source': 'pool/a'}]))
 
     def test_background_heartbeat_and_terminal_batch(self):
         live = self.live(enabled=True, host='broker', heartbeat_seconds=0.05,

@@ -17,6 +17,7 @@ from .results import (
 )
 from .state import STATE
 from .process_lifecycle import check_cancelled
+from .transfer_stats import live_stats_options, start_transfer, finish_transfer, record_transfer_stats
 from .utils import remote_name_from_path, validate_upload_command
 
 
@@ -62,13 +63,20 @@ def run_command_streamed(
     )
 
     captured_lines: list[str] = []
-    if process.stdout is not None:
-        for line in process.stdout:
-            append_diagnostics(line)
-            captured_lines.append(line.rstrip("\n"))
-            print_thread_output(thread_number, remote_path, line)
-
-    return process.wait(), "\n".join(captured_lines)
+    try:
+        start_transfer(remote_path)
+        if process.stdout is not None:
+            for line in process.stdout:
+                if record_transfer_stats(remote_path, line):
+                    continue  # Healthy samples are metrics, not retained failure diagnostics.
+                append_diagnostics(line)
+                captured_lines.append(line.rstrip("\n"))
+                print_thread_output(thread_number, remote_path, line)
+        return process.wait(), "\n".join(captured_lines)
+    finally:
+        finish_transfer(remote_path)
+        if process.stdout is not None:
+            process.stdout.close()
 
 
 def get_upload_buffer_options(upload: UploadDirectory) -> list[str]:
@@ -151,7 +159,7 @@ def upload_one_directory(job_number: int, upload: UploadDirectory) -> bool:
         upload_command,
         upload.local_path,
         upload.remote_path,
-    ] + upload_delete_options + copy_options + buffer_options + file_list_options
+    ] + upload_delete_options + live_stats_options(copy_options) + buffer_options + file_list_options
 
     if upload_command == "sync" and upload.delete_to_trash:
         record_upload_trash_mode_attempted(upload.remote_path)

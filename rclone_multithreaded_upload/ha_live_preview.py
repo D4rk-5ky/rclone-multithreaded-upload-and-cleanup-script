@@ -2,6 +2,7 @@
 
 Local extension: update(details={...}) accepts detached JSON metadata for concurrent
 application progress. The standard completion/live fields retain their semantics.
+An optional before_publish callback refreshes local observations before heartbeats.
 
 No dependency on mqtt_status.py. Application updates only local memory; a
 daemon batches MQTT work into killable subprocesses. See LIVE_PREVIEW.md.
@@ -182,7 +183,7 @@ class LivePreview:
     """
 
     def __init__(self, config: LiveConfig, *, name: str, job: str, version: str = "",
-                 run_id: str | None = None, dry_run: bool = False):
+                 run_id: str | None = None, dry_run: bool = False, before_publish=None):
         for value in (name, job):
             if not isinstance(value, str) or not value.strip():
                 raise ValueError("name and job must be nonempty strings")
@@ -192,6 +193,9 @@ class LivePreview:
             raise ValueError("run_id must be a nonempty string")
         self.config, self.name, self.job, self.version = config, name, job, version
         self.run_id, self.dry_run = run_id or str(uuid.uuid4()), dry_run
+        if before_publish is not None and not callable(before_publish):
+            raise ValueError("before_publish must be callable or null")
+        self._before_publish = before_publish
         self._lock, self._process_lock = Lock(), Lock()
         self._wake, self._stop = Event(), Event()
         self._thread: Thread | None = None
@@ -284,34 +288,6 @@ class LivePreview:
             for outcome in ("successful", "failed", "skipped"):
                 merged[outcome + "_dataset_count"] = len(merged[outcome + "_datasets"])
             self._state, self._dirty = merged, True
-        self._wake.set()
-        return True
-
-    def record_dataset(self, outcome: str, *, source: str, destination: str = "", reason: str = "") -> bool:
-        """Record a dataset's latest outcome, keyed by (source, destination).
-
-        A retry outcome replaces the previous classification. This is current
-        per-dataset state, not attempt history. Generic item counters are separate.
-        """
-        groups = {"success": "successful_datasets", "failure": "failed_datasets", "skipped": "skipped_datasets"}
-        if outcome not in groups:
-            raise ValueError("dataset outcome must be success, failure or skipped")
-        if not isinstance(source, str) or not source.strip() or any(not isinstance(x, str) for x in (destination, reason)):
-            raise ValueError("source must be nonempty text; destination and reason must be strings")
-        row = {"source": source, "destination": destination}
-        if reason:
-            row["reason"] = reason
-        _json(row)
-        with self._lock:
-            if self._finished:
-                return False
-            for group in groups.values():
-                self._state[group] = [item for item in self._state[group]
-                                      if (item.get("source"), item.get("destination", "")) != (source, destination)]
-            self._state[groups[outcome]].append(row)
-            for label in ("successful", "failed", "skipped"):
-                self._state[label + "_dataset_count"] = len(self._state[label + "_datasets"])
-            self._dirty = True
         self._wake.set()
         return True
 
@@ -414,6 +390,11 @@ class LivePreview:
                     self._wake.wait(timeout=delay)
                     self._wake.clear()
                     continue
+                if self._before_publish is not None:
+                    try:
+                        self._before_publish()  # Outside self._lock: callback may update local state.
+                    except Exception:
+                        pass  # Observation refresh must not stop the publisher.
                 with self._lock:
                     self._dirty = False
                     finished, result = self._finished, self._result

@@ -31,6 +31,33 @@ from .utils import format_bytes, parse_size_to_bytes
 from .verification import verify_upload_snapshot
 
 
+def run_remote_workers(uploads, workers, operation, *args, stage, label, error_prefix,
+                       skip_upload_on_error=False) -> dict[str, bool]:
+    """Join one barrier's workers, isolating ordinary failures per destination.
+
+    Cancellation exceptions propagate to StopAwareExecutor so queued work is
+    cancelled. Callers choose eligibility and wait for this complete result map
+    before starting the next stage; this helper makes no cleanup/upload decisions.
+    """
+    results = {}
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = {executor.submit(operation, index, upload, *args): upload
+                   for index, upload in enumerate(uploads, start=1)}
+        for future in as_completed(futures):
+            upload = futures[future]
+            try:
+                success = future.result()
+            except Exception as error:
+                detail = f"{error_prefix}: {error}"
+                record_stage_failure(upload.remote_path, stage, detail)
+                if skip_upload_on_error:
+                    record_stage_skipped(upload.remote_path, "upload")
+                print_job_block(label, 0, upload.remote_path, detail)
+                success = False
+            results[upload.remote_path] = success
+    return results
+
+
 def print_snapshot_summary(
     job_number: int,
     snapshot_name: str,
@@ -200,38 +227,17 @@ def run_reservation_and_upload_phase(
     clear_local_size_cache()
     with STATE.planned_upload_files_lock:
         STATE.planned_upload_files.clear()
-    failed = False
-
     preparation_workers = max(STATE.cleanup_threads, STATE.remote_quota_cleanup_threads)
     print_step(
         "PRE-UPLOAD PREPARATION: all remotes must finish snapshot/cleanup/reservation "
         f"before trash cleanup starts; using up to {preparation_workers} JOB(s)"
     )
 
-    preparation_success: dict[str, bool] = {}
-    with ThreadPoolExecutor(max_workers=preparation_workers) as executor:
-        future_to_upload = {
-            executor.submit(
-                prepare_one_remote_for_upload,
-                index,
-                upload,
-                cleanup_directories,
-            ): upload
-            for index, upload in enumerate(STATE.upload_directories, start=1)
-        }
-        for future in as_completed(future_to_upload):
-            upload = future_to_upload[future]
-            try:
-                success = future.result()
-            except Exception as error:
-                detail = f"Pre-upload preparation crashed: {error}"
-                record_stage_failure(upload.remote_path, "reservation", detail)
-                record_stage_skipped(upload.remote_path, "upload")
-                print_job_block("PRE-UPLOAD PREPARATION", 0, upload.remote_path, detail)
-                success = False
-            preparation_success[upload.remote_path] = success
-            if not success:
-                failed = True
+    preparation_success = run_remote_workers(
+        STATE.upload_directories, preparation_workers, prepare_one_remote_for_upload,
+        cleanup_directories, stage="reservation", label="PRE-UPLOAD PREPARATION",
+        error_prefix="Pre-upload preparation crashed", skip_upload_on_error=True,
+    )
 
     trash_candidates = [
         upload
@@ -243,25 +249,11 @@ def run_reservation_and_upload_phase(
         f"cleanup jobs now run using up to {STATE.trash_cleanup_threads} JOB(s)"
     )
 
-    trash_success: dict[str, bool] = {}
-    with ThreadPoolExecutor(max_workers=STATE.trash_cleanup_threads) as executor:
-        future_to_upload = {
-            executor.submit(pre_upload_trash_cleanup_one_remote, index, upload): upload
-            for index, upload in enumerate(trash_candidates, start=1)
-        }
-        for future in as_completed(future_to_upload):
-            upload = future_to_upload[future]
-            try:
-                success = future.result()
-            except Exception as error:
-                detail = f"Pre-upload trash cleanup crashed: {error}"
-                record_stage_failure(upload.remote_path, "reservation", detail)
-                record_stage_skipped(upload.remote_path, "upload")
-                print_job_block("PRE-UPLOAD TRASH CLEANUP", 0, upload.remote_path, detail)
-                success = False
-            trash_success[upload.remote_path] = success
-            if not success:
-                failed = True
+    trash_success = run_remote_workers(
+        trash_candidates, STATE.trash_cleanup_threads, pre_upload_trash_cleanup_one_remote,
+        stage="reservation", label="PRE-UPLOAD TRASH CLEANUP",
+        error_prefix="Pre-upload trash cleanup crashed", skip_upload_on_error=True,
+    )
 
     upload_candidates = [
         upload
@@ -278,24 +270,11 @@ def run_reservation_and_upload_phase(
         "UPLOAD: trash-cleanup barrier reached; all eligible uploads now run using "
         f"up to {STATE.upload_threads} JOB(s)"
     )
-    with ThreadPoolExecutor(max_workers=STATE.upload_threads) as executor:
-        future_to_upload = {
-            executor.submit(upload_one_directory, index, upload): upload
-            for index, upload in enumerate(upload_candidates, start=1)
-        }
-        for future in as_completed(future_to_upload):
-            upload = future_to_upload[future]
-            try:
-                success = future.result()
-            except Exception as error:
-                detail = f"Upload worker crashed: {error}"
-                record_stage_failure(upload.remote_path, "upload", detail)
-                print_job_block("UPLOAD JOB", 0, upload.remote_path, detail)
-                success = False
-            if not success:
-                failed = True
-
-    return not failed
+    upload_success = run_remote_workers(
+        upload_candidates, STATE.upload_threads, upload_one_directory,
+        stage="upload", label="UPLOAD JOB", error_prefix="Upload worker crashed",
+    )
+    return all(preparation_success.values()) and all(trash_success.values()) and all(upload_success.values())
 
 
 def post_cleanup_plan_one_remote(
@@ -352,31 +331,11 @@ def run_post_upload_cleanup_phase(
         "POST-UPLOAD CLEANUP: one recursive snapshot per remote for age, rule limits, "
         f"and max_total_size planning using up to {workers} JOB(s)"
     )
-    failed = False
-    cleanup_success: dict[str, bool] = {}
-
-    with ThreadPoolExecutor(max_workers=workers) as executor:
-        future_to_upload = {
-            executor.submit(
-                post_cleanup_plan_one_remote,
-                index,
-                upload,
-                cleanup_directories,
-            ): upload
-            for index, upload in enumerate(STATE.upload_directories, start=1)
-        }
-        for future in as_completed(future_to_upload):
-            upload = future_to_upload[future]
-            try:
-                success = future.result()
-            except Exception as error:
-                detail = f"Post-upload cleanup worker crashed: {error}"
-                record_stage_failure(upload.remote_path, "post_cleanup", detail)
-                print_job_block("POST-UPLOAD CLEANUP", 0, upload.remote_path, detail)
-                success = False
-            cleanup_success[upload.remote_path] = success
-            if not success:
-                failed = True
+    cleanup_success = run_remote_workers(
+        STATE.upload_directories, workers, post_cleanup_plan_one_remote, cleanup_directories,
+        stage="post_cleanup", label="POST-UPLOAD CLEANUP",
+        error_prefix="Post-upload cleanup worker crashed",
+    )
 
     trash_candidates = [
         upload
@@ -387,24 +346,13 @@ def run_post_upload_cleanup_phase(
         "POST-UPLOAD TRASH CLEANUP: cleanup barrier reached; all eligible trash cleanup "
         f"jobs now run using up to {STATE.trash_cleanup_threads} JOB(s)"
     )
-    with ThreadPoolExecutor(max_workers=STATE.trash_cleanup_threads) as executor:
-        future_to_upload = {
-            executor.submit(post_upload_trash_cleanup_one_remote, index, upload): upload
-            for index, upload in enumerate(trash_candidates, start=1)
-        }
-        for future in as_completed(future_to_upload):
-            upload = future_to_upload[future]
-            try:
-                if not future.result():
-                    failed = True
-            except Exception as error:
-                detail = f"Post-upload trash cleanup worker crashed: {error}"
-                record_stage_failure(upload.remote_path, "post_cleanup", detail)
-                print_job_block("POST-UPLOAD TRASH CLEANUP", 0, upload.remote_path, detail)
-                failed = True
-
+    trash_success = run_remote_workers(
+        trash_candidates, STATE.trash_cleanup_threads, post_upload_trash_cleanup_one_remote,
+        stage="post_cleanup", label="POST-UPLOAD TRASH CLEANUP",
+        error_prefix="Post-upload trash cleanup worker crashed",
+    )
     finalize_stage_for_all("post_cleanup")
-    return not failed
+    return all(cleanup_success.values()) and all(trash_success.values())
 
 
 def verify_one_remote(
@@ -429,28 +377,11 @@ def verify_one_remote(
 def run_final_verification(cleanup_directories: list[CleanupTarget]) -> bool:
     """Use exactly one final recursive snapshot per remote for every final limit check."""
     print_step("FINAL VERIFICATION: one recursive snapshot per remote for all limits")
-    failed = False
     workers = max(STATE.cleanup_threads, STATE.remote_quota_cleanup_threads)
-    with ThreadPoolExecutor(max_workers=workers) as executor:
-        future_to_upload = {
-            executor.submit(
-                verify_one_remote,
-                index,
-                upload,
-                cleanup_directories,
-            ): upload
-            for index, upload in enumerate(STATE.upload_directories, start=1)
-        }
-        for future in as_completed(future_to_upload):
-            upload = future_to_upload[future]
-            try:
-                if not future.result():
-                    failed = True
-            except Exception as error:
-                detail = f"Final verification crashed: {error}"
-                record_stage_failure(upload.remote_path, "final_quota", detail)
-                print_job_block("FINAL SNAPSHOT VERIFY", 0, upload.remote_path, detail)
-                failed = True
-
+    success = run_remote_workers(
+        STATE.upload_directories, workers, verify_one_remote, cleanup_directories,
+        stage="final_quota", label="FINAL SNAPSHOT VERIFY",
+        error_prefix="Final verification crashed",
+    )
     finalize_stage_for_all("final_quota")
-    return not failed
+    return all(success.values())

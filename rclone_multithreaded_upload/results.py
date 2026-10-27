@@ -3,6 +3,7 @@
 import re
 
 from .reporting import refresh_live
+from .progress import STAGES
 from .models import RemoteRunResult, StageRunResult
 from .output import OUTPUT_LOCK, OUTPUT_SEPARATOR
 from .state import STATE
@@ -105,12 +106,7 @@ def finalize_stage_for_all(stage_name: str):
 def mark_pending_stages_skipped():
     with STATE.run_results_lock:
         for result in STATE.run_results.values():
-            for stage_name in (
-                "reservation",
-                "upload",
-                "post_cleanup",
-                "final_quota",
-            ):
+            for stage_name in STAGES:
                 stage = getattr(result, stage_name)
                 if stage.status == "PENDING":
                     stage.status = "SKIPPED"
@@ -147,12 +143,7 @@ def command_error_summary(
 
 
 def remote_result_label(result: RemoteRunResult) -> str:
-    statuses = [
-        result.reservation.status,
-        result.upload.status,
-        result.post_cleanup.status,
-        result.final_quota.status,
-    ]
+    statuses = [getattr(result, stage).status for stage in STAGES]
     if "FAILED" in statuses:
         return "FAILED"
     if all(status == "SUCCESS" for status in statuses):

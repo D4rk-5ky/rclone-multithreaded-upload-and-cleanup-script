@@ -102,9 +102,6 @@
       "copy_options": [
         "--max-age",
         "3h",
-        "--stats",
-        "10s",
-        "--stats-one-line",
         "--transfers",
         "4",
         "--exclude",
@@ -159,9 +156,6 @@
       "copy_options": [
         "--max-age",
         "3h",
-        "--stats",
-        "10s",
-        "--stats-one-line",
         "--transfers",
         "4",
         "--exclude",
@@ -216,9 +210,6 @@
       "copy_options": [
         "--max-age",
         "3h",
-        "--stats",
-        "10s",
-        "--stats-one-line",
         "--transfers",
         "4",
         "--exclude",

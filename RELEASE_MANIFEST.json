@@ -1,11 +1,11 @@
 {
   "application": "rclone-multithreaded-upload",
-  "version": "0.0.35",
-  "previous_version": "0.0.34",
+  "version": "0.0.37",
+  "previous_version": "0.0.36",
   "date": "2026-10-27",
   "zip_root": "rclone-multithreaded-upload-and-cleanup-script-main",
   "version_policy": "Increment by 0.0.1; 0.0.99 -> 0.1.0.",
-  "file_count": 56,
+  "file_count": 58,
   "files": [
     ".gitignore",
     "AGENTS.md",
@@ -49,6 +49,7 @@
     "rclone_multithreaded_upload/state.py",
     "rclone_multithreaded_upload/summary.py",
     "rclone_multithreaded_upload/targets.py",
+    "rclone_multithreaded_upload/transfer_stats.py",
     "rclone_multithreaded_upload/upload.py",
     "rclone_multithreaded_upload/utils.py",
     "rclone_multithreaded_upload/verification.py",
@@ -62,79 +63,80 @@
     "tests/test_parallel_progress.py",
     "tests/test_process_lifecycle.py",
     "tests/test_reporting_adapter.py",
+    "tests/test_transfer_stats.py",
     "verification_report.txt"
   ],
-  "cleanup_authorization": "Owner requested removal of redundant/obsolete config and function compatibility code.",
+  "scope": "Owner-requested removal of redundant stage runners and obsolete progress/Python API compatibility.",
   "intentional_removals": {},
   "code_count_comparison": {
     "method": "Physical lines use splitlines() for every shipped .py file. Code lines are token-bearing, nonblank physical lines excluding comment-only and AST docstring-only lines; multiline non-docstring fixture strings are counted. Runtime and tests are disjoint. Docs, configs and payload JSON are not Python code. HA YAML physical/nonblank/noncomment lines are reported separately.",
-    "before_version": "0.0.34",
-    "after_version": "0.0.35",
+    "before_version": "0.0.36",
+    "after_version": "0.0.37",
     "counts": {
-      "0.0.34": {
+      "0.0.36": {
         "runtime_python": {
-          "files": 29,
-          "physical_lines": 4703,
-          "code_lines": 3876,
-          "functions": 173
+          "files": 30,
+          "physical_lines": 4683,
+          "code_lines": 3868,
+          "functions": 171
         },
         "test_python": {
-          "files": 8,
-          "physical_lines": 3501,
-          "code_lines": 3143,
-          "functions": 227
+          "files": 9,
+          "physical_lines": 3770,
+          "code_lines": 3389,
+          "functions": 244
         },
         "total_python": {
-          "files": 37,
-          "physical_lines": 8204,
-          "code_lines": 7019,
-          "functions": 400
+          "files": 39,
+          "physical_lines": 8453,
+          "code_lines": 7257,
+          "functions": 415
         },
         "ha_yaml": {
           "files": 2,
-          "physical_lines": 339,
-          "nonblank_noncomment_lines": 296
+          "physical_lines": 350,
+          "nonblank_noncomment_lines": 305
         },
         "all_code_files": {
-          "files": 39,
-          "physical_lines": 8543
+          "files": 41,
+          "physical_lines": 8803
         }
       },
-      "0.0.35": {
+      "0.0.37": {
         "runtime_python": {
-          "files": 29,
-          "physical_lines": 4550,
-          "code_lines": 3756,
-          "functions": 166
+          "files": 30,
+          "physical_lines": 4546,
+          "code_lines": 3739,
+          "functions": 169
         },
         "test_python": {
-          "files": 8,
-          "physical_lines": 3517,
-          "code_lines": 3158,
-          "functions": 228
+          "files": 9,
+          "physical_lines": 3828,
+          "code_lines": 3441,
+          "functions": 247
         },
         "total_python": {
-          "files": 37,
-          "physical_lines": 8067,
-          "code_lines": 6914,
-          "functions": 394
+          "files": 39,
+          "physical_lines": 8374,
+          "code_lines": 7180,
+          "functions": 416
         },
         "ha_yaml": {
           "files": 2,
-          "physical_lines": 339,
-          "nonblank_noncomment_lines": 296
+          "physical_lines": 350,
+          "nonblank_noncomment_lines": 305
         },
         "all_code_files": {
-          "files": 39,
-          "physical_lines": 8406
+          "files": 41,
+          "physical_lines": 8724
         }
       }
     }
   },
   "breaking_changes": [
-    "Removed legacy mqtt config/option conversion; use completion and timeout.",
-    "Removed obsolete Python helpers/re-exports and MqttConfig/__version__ aliases.",
-    "Removed duplicate completion identity/version fields; use name/job/version."
+    "Removed unused dataset builder keyword arguments, record_dataset and PublishResult.sent Python helpers.",
+    "Removed completed_stages/total_stages and duplicate live remote_jobs[].stages; detailed progress and completion result stages remain.",
+    "HA card expects current activity fields and failure status; update app and card together."
   ],
   "original_archive": {
     "name": "rclone-multithreaded-upload-and-cleanup-script-main.zip",
@@ -157,13 +159,15 @@
       "rclone_multithreaded_upload/process_lifecycle.py",
       "rclone_multithreaded_upload/progress.py",
       "rclone_multithreaded_upload/reporting.py",
+      "rclone_multithreaded_upload/transfer_stats.py",
       "requirements-test.txt",
       "tests/test_ha_live_preview.py",
       "tests/test_manufacturer_card.py",
       "tests/test_mqtt_status.py",
       "tests/test_parallel_progress.py",
       "tests/test_process_lifecycle.py",
-      "tests/test_reporting_adapter.py"
+      "tests/test_reporting_adapter.py",
+      "tests/test_transfer_stats.py"
     ],
     "modified_files": [
       ".gitignore",
@@ -207,10 +211,10 @@
     ]
   },
   "previous_release": {
-    "name": "rclone-multithreaded-upload-and-cleanup-script-0.0.34.zip",
-    "sha256": "380fbaba75775670498f4fc3d972b5d77230db8dbcc360bf5282f7889d451188",
-    "file_count": 56,
-    "retained_count": 56,
+    "name": "rclone-multithreaded-upload-and-cleanup-script-0.0.36.zip",
+    "sha256": "519bb31415776e5e03fd7716576eaeccaab1b46f1c9d57dc6f376f549d4d9cf2",
+    "file_count": 58,
+    "retained_count": 58,
     "unexpected_missing_files": [],
     "intentionally_removed_files": {},
     "added_files": [],
@@ -223,27 +227,21 @@
       "VERSIONING.md",
       "commented_code_map.md",
       "live-payload-examples.json",
+      "manufacturer-live-preview-card.yaml",
       "payload-examples.json",
-      "rclone-multithreaded-upload.py",
       "rclone_multithreaded_upload/__init__.py",
-      "rclone_multithreaded_upload/cleanup.py",
-      "rclone_multithreaded_upload/config.py",
-      "rclone_multithreaded_upload/delete_plan.py",
-      "rclone_multithreaded_upload/lock.py",
-      "rclone_multithreaded_upload/models.py",
+      "rclone_multithreaded_upload/ha_live_preview.py",
       "rclone_multithreaded_upload/mqtt.py",
       "rclone_multithreaded_upload/mqtt_status.py",
       "rclone_multithreaded_upload/phases.py",
-      "rclone_multithreaded_upload/remote_files.py",
-      "rclone_multithreaded_upload/reporting.py",
-      "rclone_multithreaded_upload/reservation.py",
+      "rclone_multithreaded_upload/progress.py",
       "rclone_multithreaded_upload/results.py",
-      "rclone_multithreaded_upload/state.py",
-      "rclone_multithreaded_upload/summary.py",
-      "rclone_multithreaded_upload/upload.py",
-      "rclone_multithreaded_upload/utils.py",
+      "tests/test_ha_live_preview.py",
+      "tests/test_integration_fake_rclone.py",
       "tests/test_logic.py",
+      "tests/test_manufacturer_card.py",
       "tests/test_mqtt_status.py",
+      "tests/test_parallel_progress.py",
       "tests/test_reporting_adapter.py",
       "verification_report.txt"
     ],
@@ -253,26 +251,34 @@
       "PROCESS_LIFECYCLE.md",
       "config.example.json",
       "home-assistant-mqtt-automation.example.yaml",
-      "manufacturer-live-preview-card.yaml",
       "rclone-cctv-config.example.json",
+      "rclone-multithreaded-upload.py",
+      "rclone_multithreaded_upload/cleanup.py",
       "rclone_multithreaded_upload/cli.py",
       "rclone_multithreaded_upload/commands.py",
-      "rclone_multithreaded_upload/ha_live_preview.py",
+      "rclone_multithreaded_upload/config.py",
+      "rclone_multithreaded_upload/delete_plan.py",
+      "rclone_multithreaded_upload/lock.py",
       "rclone_multithreaded_upload/main.py",
+      "rclone_multithreaded_upload/models.py",
       "rclone_multithreaded_upload/output.py",
       "rclone_multithreaded_upload/planning.py",
       "rclone_multithreaded_upload/process_lifecycle.py",
-      "rclone_multithreaded_upload/progress.py",
       "rclone_multithreaded_upload/rclone_backend.py",
+      "rclone_multithreaded_upload/remote_files.py",
+      "rclone_multithreaded_upload/reporting.py",
+      "rclone_multithreaded_upload/reservation.py",
+      "rclone_multithreaded_upload/state.py",
+      "rclone_multithreaded_upload/summary.py",
       "rclone_multithreaded_upload/targets.py",
+      "rclone_multithreaded_upload/transfer_stats.py",
+      "rclone_multithreaded_upload/upload.py",
+      "rclone_multithreaded_upload/utils.py",
       "rclone_multithreaded_upload/verification.py",
       "requirements-mqtt.txt",
       "requirements-test.txt",
-      "tests/test_ha_live_preview.py",
-      "tests/test_integration_fake_rclone.py",
-      "tests/test_manufacturer_card.py",
-      "tests/test_parallel_progress.py",
-      "tests/test_process_lifecycle.py"
+      "tests/test_process_lifecycle.py",
+      "tests/test_transfer_stats.py"
     ]
   },
   "supplied_template": {
@@ -280,14 +286,15 @@
     "sha256": "315211cd55e8cf2062c83993ea0b57336c4ad62d589fafd4e68798292b227409",
     "completion_version": "1.1.0",
     "live_version": "1.2.0",
-    "local_live_extension": "Optional JSON-object details for parallel progress"
+    "local_live_extension": "Detailed parallel step/transfer metrics and optional local pre-publish callback; unused generic per-item Python helper omitted",
+    "local_completion_customization": "Unused dataset builder keywords/property omitted; current standard wire fields/validation/transport preserved"
   },
   "verified": {
-    "offline_tests_passed": 157,
+    "offline_tests_passed": 169,
     "skipped_tests": 0,
-    "documented_explicit_functions": 394,
+    "documented_explicit_functions": 416,
+    "phase_orchestration_equivalence_scenarios": 648,
     "safety_operations_preserved": true,
-    "option_partition_equivalence_cases": 5000,
     "obsolete_api_removal_verified": true,
     "strict_config_key_rejection": true,
     "config_examples_complete": true,

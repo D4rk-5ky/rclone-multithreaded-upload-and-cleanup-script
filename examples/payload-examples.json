@@ -13,8 +13,8 @@
     "schema_version": 1,
     "command": "rclone-multithreaded-upload",
     "comment": "",
-    "version": "0.0.35",
-    "timestamp": "2026-10-27T14:17:02.847525+00:00",
+    "version": "0.0.37",
+    "timestamp": "2026-10-27T18:02:30.531369+00:00",
     "host": "darkyere-VirtualBox",
     "run_id": "synthetic-success-example",
     "event": "rclone_multithreaded_upload_result",
@@ -56,8 +56,8 @@
               "activity": "Snapshot",
               "status": "SUCCESS",
               "error": "",
-              "started_at": "2026-10-27T14:17:02.847172+00:00",
-              "finished_at": "2026-10-27T14:17:02.847213+00:00"
+              "started_at": "2026-10-27T18:02:30.530866+00:00",
+              "finished_at": "2026-10-27T18:02:30.530893+00:00"
             },
             {
               "id": "pre_delete",
@@ -68,7 +68,7 @@
               "status": "SKIPPED",
               "error": "No deletion needed in this synthetic example",
               "started_at": null,
-              "finished_at": "2026-10-27T14:17:02.847224+00:00"
+              "finished_at": "2026-10-27T18:02:30.530904+00:00"
             },
             {
               "id": "upload",
@@ -78,8 +78,8 @@
               "activity": "Upload",
               "status": "SUCCESS",
               "error": "",
-              "started_at": "2026-10-27T14:17:02.847235+00:00",
-              "finished_at": "2026-10-27T14:17:02.847241+00:00"
+              "started_at": "2026-10-27T18:02:30.531078+00:00",
+              "finished_at": "2026-10-27T18:02:30.531092+00:00"
             },
             {
               "id": "post_snapshot",
@@ -89,8 +89,8 @@
               "activity": "Snapshot",
               "status": "SUCCESS",
               "error": "",
-              "started_at": "2026-10-27T14:17:02.847247+00:00",
-              "finished_at": "2026-10-27T14:17:02.847253+00:00"
+              "started_at": "2026-10-27T18:02:30.531100+00:00",
+              "finished_at": "2026-10-27T18:02:30.531108+00:00"
             },
             {
               "id": "post_delete",
@@ -101,7 +101,7 @@
               "status": "SKIPPED",
               "error": "No deletion needed in this synthetic example",
               "started_at": null,
-              "finished_at": "2026-10-27T14:17:02.847260+00:00"
+              "finished_at": "2026-10-27T18:02:30.531116+00:00"
             },
             {
               "id": "final_snapshot",
@@ -111,8 +111,8 @@
               "activity": "Snapshot",
               "status": "SUCCESS",
               "error": "",
-              "started_at": "2026-10-27T14:17:02.847267+00:00",
-              "finished_at": "2026-10-27T14:17:02.847273+00:00"
+              "started_at": "2026-10-27T18:02:30.531125+00:00",
+              "finished_at": "2026-10-27T18:02:30.531131+00:00"
             },
             {
               "id": "verification",
@@ -122,20 +122,20 @@
               "activity": "Verification",
               "status": "SUCCESS",
               "error": "",
-              "started_at": "2026-10-27T14:17:02.847279+00:00",
-              "finished_at": "2026-10-27T14:17:02.847285+00:00"
+              "started_at": "2026-10-27T18:02:30.531138+00:00",
+              "finished_at": "2026-10-27T18:02:30.531145+00:00"
             }
           ],
           "cleanup_jobs": [],
-          "stages": {
-            "reservation": "SUCCESS",
-            "upload": "SUCCESS",
-            "post_cleanup": "SUCCESS",
-            "final_quota": "SUCCESS"
-          },
           "stderr": "",
           "error": "",
-          "has_failures": false
+          "has_failures": false,
+          "transferred_bytes": 1048576,
+          "bytes_per_second": 0.0,
+          "average_bytes_per_second": 209715.2,
+          "transfer_elapsed_seconds": 5,
+          "transfer_stats_received": true,
+          "transfer_stats_stale": false
         }
       }
     ],
@@ -143,6 +143,8 @@
       "schema_version": 1,
       "unit": "steps",
       "destination_count": 1,
+      "transferred_bytes": 1048576,
+      "bytes_per_second": 0.0,
       "activity_counts": {},
       "activity": "Finished",
       "active_destination_count": 0,
@@ -150,9 +152,7 @@
       "total": 7,
       "running": 0,
       "failed": 0,
-      "skipped": 2,
-      "completed_stages": 4,
-      "total_stages": 4
+      "skipped": 2
     }
   },
   "failure": {
@@ -169,8 +169,8 @@
     "schema_version": 1,
     "command": "rclone-multithreaded-upload",
     "comment": "",
-    "version": "0.0.35",
-    "timestamp": "2026-10-27T14:17:02.848323+00:00",
+    "version": "0.0.37",
+    "timestamp": "2026-10-27T18:02:30.532336+00:00",
     "host": "darkyere-VirtualBox",
     "run_id": "synthetic-failure-example",
     "event": "rclone_multithreaded_upload_result",
@@ -219,8 +219,8 @@
               "activity": "Snapshot",
               "status": "SUCCESS",
               "error": "",
-              "started_at": "2026-10-27T14:17:02.848071+00:00",
-              "finished_at": "2026-10-27T14:17:02.848086+00:00"
+              "started_at": "2026-10-27T18:02:30.531931+00:00",
+              "finished_at": "2026-10-27T18:02:30.531949+00:00"
             },
             {
               "id": "pre_delete",
@@ -231,7 +231,7 @@
               "status": "SKIPPED",
               "error": "No deletion needed in this synthetic example",
               "started_at": null,
-              "finished_at": "2026-10-27T14:17:02.848093+00:00"
+              "finished_at": "2026-10-27T18:02:30.531957+00:00"
             },
             {
               "id": "upload",
@@ -241,8 +241,8 @@
               "activity": "Upload",
               "status": "FAILED",
               "error": "Synthetic example: remote quota exceeded",
-              "started_at": "2026-10-27T14:17:02.848101+00:00",
-              "finished_at": "2026-10-27T14:17:02.848107+00:00"
+              "started_at": "2026-10-27T18:02:30.532083+00:00",
+              "finished_at": "2026-10-27T18:02:30.532095+00:00"
             },
             {
               "id": "post_snapshot",
@@ -252,8 +252,8 @@
               "activity": "Snapshot",
               "status": "SUCCESS",
               "error": "",
-              "started_at": "2026-10-27T14:17:02.848114+00:00",
-              "finished_at": "2026-10-27T14:17:02.848120+00:00"
+              "started_at": "2026-10-27T18:02:30.532104+00:00",
+              "finished_at": "2026-10-27T18:02:30.532110+00:00"
             },
             {
               "id": "post_delete",
@@ -264,7 +264,7 @@
               "status": "SKIPPED",
               "error": "No deletion needed in this synthetic example",
               "started_at": null,
-              "finished_at": "2026-10-27T14:17:02.848125+00:00"
+              "finished_at": "2026-10-27T18:02:30.532117+00:00"
             },
             {
               "id": "final_snapshot",
@@ -274,8 +274,8 @@
               "activity": "Snapshot",
               "status": "SUCCESS",
               "error": "",
-              "started_at": "2026-10-27T14:17:02.848131+00:00",
-              "finished_at": "2026-10-27T14:17:02.848136+00:00"
+              "started_at": "2026-10-27T18:02:30.532124+00:00",
+              "finished_at": "2026-10-27T18:02:30.532131+00:00"
             },
             {
               "id": "verification",
@@ -285,20 +285,20 @@
               "activity": "Verification",
               "status": "SUCCESS",
               "error": "",
-              "started_at": "2026-10-27T14:17:02.848142+00:00",
-              "finished_at": "2026-10-27T14:17:02.848148+00:00"
+              "started_at": "2026-10-27T18:02:30.532137+00:00",
+              "finished_at": "2026-10-27T18:02:30.532144+00:00"
             }
           ],
           "cleanup_jobs": [],
-          "stages": {
-            "reservation": "SUCCESS",
-            "upload": "FAILED",
-            "post_cleanup": "SUCCESS",
-            "final_quota": "SUCCESS"
-          },
           "stderr": "",
           "error": "Synthetic example: remote quota exceeded",
-          "has_failures": true
+          "has_failures": true,
+          "transferred_bytes": 1234,
+          "bytes_per_second": 0.0,
+          "average_bytes_per_second": 246.8,
+          "transfer_elapsed_seconds": 5,
+          "transfer_stats_received": true,
+          "transfer_stats_stale": false
         }
       }
     ],
@@ -306,6 +306,8 @@
       "schema_version": 1,
       "unit": "steps",
       "destination_count": 1,
+      "transferred_bytes": 1234,
+      "bytes_per_second": 0.0,
       "activity_counts": {},
       "activity": "Finished",
       "active_destination_count": 0,
@@ -313,9 +315,7 @@
       "total": 7,
       "running": 0,
       "failed": 1,
-      "skipped": 2,
-      "completed_stages": 4,
-      "total_stages": 4
+      "skipped": 2
     }
   }
 }

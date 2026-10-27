@@ -5,14 +5,14 @@ from .mqtt_status import build_report, publish_report
 from .output import print_error, print_step
 from .reporting import JOB, sanitize
 from .results import remote_result_label
-from .progress import progress_snapshot_locked
+from .progress import STAGES, progress_snapshot_locked
 from .state import STATE
 
 
 def _stage_errors(result) -> list[dict[str, str]]:
     return [
         {"stage": stage_name, "error": sanitize(error)}
-        for stage_name in ("reservation", "upload", "post_cleanup", "final_quota")
+        for stage_name in STAGES
         for error in getattr(result, stage_name).errors
     ]
 
@@ -32,8 +32,7 @@ def build_result_payload(exit_code: int) -> dict:
             remotes.append({
                 "name": result.name, "remote_path": result.remote_path,
                 "status": result_label.lower(),
-                "stages": {key: getattr(result, key).status for key in
-                           ("reservation", "upload", "post_cleanup", "final_quota")},
+                "stages": {key: getattr(result, key).status for key in STAGES},
                 "errors": errors,
                 "progress": progress_by_remote[result.remote_path],
             })

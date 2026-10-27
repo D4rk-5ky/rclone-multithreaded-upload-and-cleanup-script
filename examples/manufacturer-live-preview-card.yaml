@@ -2,6 +2,13 @@ type: markdown
 content: |
   {# Preset for rclone-multithreaded-upload; fields and jobs populate automatically. #}
   {% set manufacturer = 'rclone-multithreaded-upload' %}
+  {% macro byte_size(raw) -%}
+  {% set value = raw | float(none) -%}
+  {% if value is none %}Unknown{% elif value >= 1073741824 %}{{ '%.2f' | format(value / 1073741824) }} GiB{% elif value >= 1048576 %}{{ '%.2f' | format(value / 1048576) }} MiB{% elif value >= 1024 %}{{ '%.2f' | format(value / 1024) }} KiB{% else %}{{ value | int }} B{% endif %}
+  {%- endmacro %}
+  {% macro speed_text(raw) -%}
+  {% if raw is none %}Unknown{% else %}{{ byte_size(raw) }}/s{% endif %}
+  {%- endmacro %}
   {% set dataset_limit = 10 %}
   {% set stats = namespace(records=[], seen=[], running=0, finished=0, failed=0, other=0) %}
   {% for sensor in states.sensor %}
@@ -36,12 +43,12 @@ content: |
         {% if pending %}
           {% set source = fields.live %}
           {% set outcome = 'heartbeat_lost' %}
-        {% elif live_state in ['running', 'success', 'failure', 'failed', 'incomplete', 'interrupted'] %}
+        {% elif live_state in ['running', 'success', 'failure', 'incomplete', 'interrupted'] %}
           {% set source = fields.live %}
-          {% set outcome = 'failure' if live_state == 'failed' else live_state %}
-        {% elif last_state in ['success', 'failure', 'failed', 'incomplete', 'interrupted'] %}
+          {% set outcome = live_state %}
+        {% elif last_state in ['success', 'failure', 'incomplete', 'interrupted'] %}
           {% set source = fields.last %}
-          {% set outcome = 'failure' if last_state == 'failed' else last_state %}
+          {% set outcome = last_state %}
         {% else %}
           {% set source = fields.live or fields.last %}
           {% set outcome = 'unknown' %}
@@ -92,7 +99,7 @@ content: |
   ### {{ icon }} {{ record.name | e }} — {{ outcome | replace('_', ' ') | upper }}{% if dry_run %} · PREVIEW{% endif %}
   
   {% if outcome == 'running' %}
-  **Phase:** {{ detail.activity if jobs and detail.activity is defined else (state_attr(source, 'phase') or 'Preparing') | replace('_', ' ') }}
+  **Phase:** {{ detail.activity if jobs else (state_attr(source, 'phase') or 'Preparing') | replace('_', ' ') }}
   
   **Current:** {{ state_attr(source, 'current_item') or 'Preparing next item' }}
   {% elif outcome == 'heartbeat_lost' %}
@@ -129,6 +136,14 @@ content: |
   **Progress:** Unknown
   {% endif %}
   
+  **Transferred:** {{ byte_size(transferred) }} (all destinations)
+  
+  **Combined speed:** {{ speed_text(rate) }}
+  
+  **Combined average speed:** {{ speed_text(transferred / secs if transferred is not none and secs is not none and secs > 0 else none) }}
+  
+  **Runtime:** {% if secs is not none %}{{ '%02d:%02d:%02d' | format((secs // 3600) | int, ((secs % 3600) // 60) | int, (secs % 60) | int) }}{% else %}Unknown{% endif %}
+  
   {% if jobs %}
   **Steps:** {{ done if done is not none else '?' }} / {{ total if total is not none else '?' }} settled
   
@@ -136,10 +151,10 @@ content: |
   
   **Destinations — live overview**
   
-  | Destination | Activity / current step | Settled steps | Progress | State |
-  |:---|:---|:---:|:---:|:---|
+  | Destination | Activity / current step | Settled steps | Progress | Transferred | Speed | State |
+  |:---|:---|:---:|:---:|:---:|:---:|:---|
   {% for destination in jobs -%}
-  | {{ destination.name | e | replace('|', '&#124;') | replace('\n', ' ') }} | {{ destination.activity | default('Active' if destination.active_steps else 'Finished' if destination.completed == destination.total else 'Waiting for next phase') | e | replace('|', '&#124;') | replace('\n', ' ') }}{% if destination.active_steps %}: {{ destination.active_steps | join('; ') | e | replace('|', '&#124;') | replace('\n', ' ') }}{% endif %} | {{ destination.completed }} / {{ destination.total }} | {{ destination.progress_percent }}% | {{ destination.status | upper }}{% if destination.has_failures | default(false) %} · ⚠ failure recorded{% endif %} |
+  | {{ destination.name | e | replace('|', '&#124;') | replace('\n', ' ') }} | {{ destination.activity | e | replace('|', '&#124;') | replace('\n', ' ') }}{% if destination.active_steps %}: {{ destination.active_steps | join('; ') | e | replace('|', '&#124;') | replace('\n', ' ') }}{% endif %} | {{ destination.completed }} / {{ destination.total }} | {{ destination.progress_percent }}% | {{ byte_size(destination.transferred_bytes | default(none)) }} | {{ speed_text(destination.bytes_per_second | default(none)) }} | {{ destination.status | upper }}{% if destination.has_failures | default(false) %} · ⚠ failure recorded{% endif %} |
   {% endfor %}
   
   {% for destination in jobs %}
@@ -148,6 +163,12 @@ content: |
   {{ destination.source | e }} → {{ destination.destination | e }}
   
   **Progress:** {{ destination.completed }} / {{ destination.total }} steps settled ({{ destination.progress_percent }}%) · {{ destination.succeeded }} succeeded · {{ destination.failed }} failed · {{ destination.skipped }} skipped
+  
+  **Transferred:** {{ byte_size(destination.transferred_bytes | default(none)) }} · **Speed:** {{ speed_text(destination.bytes_per_second | default(none)) }} · **Upload average:** {{ speed_text(destination.average_bytes_per_second | default(none)) }}
+  {% if destination.transfer_stats_stale | default(false) %}
+  
+  _Transfer statistics are delayed; current speed is unknown._
+  {% endif %}
   
   **Active:** {{ destination.active_steps | join('; ') | e if destination.active_steps else 'None; waiting or finished' }}
   {% if destination.error | default('') %}
@@ -185,16 +206,6 @@ content: |
   **Remotes:** {{ successful | count }} successful · {{ failed | count }} failed · {{ skipped | count }} skipped
   {% endif %}
   
-  **Transferred:** {% if transferred is not none %}{{ '%.2f' | format(transferred / 1073741824) }} GiB{% else %}Unknown{% endif %}
-  
-  **Average speed:** {% if transferred is not none and secs is not none and secs > 0 %}{{ '%.2f' | format(transferred / secs / 1048576) }} MiB/s{% else %}Unknown{% endif %}
-  {% if outcome == 'running' and rate is not none %}
-  
-  **Current speed:** {{ '%.2f' | format(rate / 1048576) }} MiB/s
-  {% endif %}
-  
-  **Runtime:** {% if secs is not none %}{{ '%02d:%02d:%02d' | format((secs // 3600) | int, ((secs % 3600) // 60) | int, (secs % 60) | int) }}{% else %}Unknown{% endif %}
-  
   {% for rows, label in [(successful, 'Successful remotes'), (failed, 'Failed remotes'), (skipped, 'Skipped remotes')] %}
   {% if rows %}
   **{{ label }}**
@@ -220,4 +231,4 @@ content: |
   **No matching live-preview devices detected.** Set the same manufacturer name in LiveConfig and at the top of this template, enable MQTT discovery, and start a job using the updated live module.
   {% endif %}
   
-  _Running is determined by the live heartbeat. Expired live sensors use the retained result unless a different unfinished run is known. Unknown progress stays unknown. Steps are settled workflow observations, including failures and skips; destination progress is tracked independently. Generic jobs without detailed progress use their configured item unit. Average speed is a run average._
+  _Running is determined by the live heartbeat. Expired live sensors use the retained result unless a different unfinished run is known. Unknown progress stays unknown. Steps are settled workflow observations, including failures and skips; destination progress is tracked independently. Generic jobs without detailed progress use their configured item unit. Combined speed sums active workers. Combined average speed is total reported bytes divided by run runtime; each upload average uses its own worker duration._

@@ -51,7 +51,7 @@ def start_reporting() -> None:
         try:
             STATE.live_preview = LivePreview(
                 STATE.live_config, name=STATE.script_name, job=JOB,
-                version=VERSION, run_id=STATE.run_id,
+                version=VERSION, run_id=STATE.run_id, before_publish=refresh_live,
             )
             refresh_live()
             STATE.live_preview.start()
@@ -104,6 +104,7 @@ def refresh_live(*, clear_current: bool = False) -> None:
                         groups["skipped_datasets"].append(row)
             active = [row["name"] + ": " + ", ".join(row["active_steps"]) for row in details["remote_jobs"] if row["running"]]
             values = {"completed": details["completed"], "total": total, "details": details, **groups,
+                      "transferred_bytes": details["transferred_bytes"], "bytes_per_second": details["bytes_per_second"],
                       "current_item": "; ".join(active) if active else ("Waiting for the next phase" if details["completed"] < total else "")}
             if clear_current:
                 values["current_item"] = ""

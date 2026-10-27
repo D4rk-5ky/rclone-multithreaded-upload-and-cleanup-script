@@ -342,7 +342,7 @@ def single(topic, payload, **options):
             final = json.loads(finals[0]["payload"])
             self.assertEqual(final["completed"], 24)
             self.assertEqual(final["total"], 24)
-            self.assertEqual(final["details"]["completed_stages"], 8)
+            self.assertNotIn("completed_stages", final["details"])
             self.assertEqual(final["details"]["active_destination_count"], 0)
             for remote_job in final["details"]["remote_jobs"]:
                 self.assertEqual(remote_job["total"], 12)

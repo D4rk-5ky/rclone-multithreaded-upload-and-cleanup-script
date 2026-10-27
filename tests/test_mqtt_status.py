@@ -40,12 +40,17 @@ class ReportTests(unittest.TestCase):
         self.assertEqual(json.loads(m.encode_report(self.report()))['status'], 'success')
 
     def test_explicit_syncerate_diagnostics_remain_supported_including_empty_lists(self):
-        payload = self.report(12, planned_datasets=[], skipped_datasets=[],
-                              failed_datasets=[{'source': 'pool/a', 'destination': 'backup/a', 'reason': 'Out of space'}])
+        payload = self.report(12, extra={'planned_datasets': [], 'skipped_datasets': [],
+                              'failed_datasets': [{'source': 'pool/a', 'destination': 'backup/a', 'reason': 'Out of space'}]})
         self.assertEqual(payload['planned_datasets'], [])
         self.assertEqual(payload['skipped_datasets'], [])
         self.assertEqual(payload['failed_datasets'][0]['reason'], 'Out of space')
         self.assertEqual(json.loads(m.encode_report(payload)), payload)
+        for key in ('planned_datasets', 'skipped_datasets', 'failed_datasets'):
+            with self.subTest(removed_argument=key), self.assertRaises(TypeError):
+                self.report(**{key: []})
+        self.assertFalse(hasattr(m, '_dataset_list'))
+        self.assertFalse(hasattr(m.PublishResult('sent', 'done'), 'sent'))
 
     def test_invalid_optional_dataset_extensions_are_rejected(self):
         for value in (None, 'text', ['text'], {'source': 'a'}):
@@ -84,7 +89,7 @@ class ReportTests(unittest.TestCase):
     def test_extra_project_details_and_datasets_are_detached(self):
         extra = {'context': 'Camera uploads', 'remotes': [{'name': 'Cloud'}]}
         datasets = [{'source': 'pool/a', 'destination': 'backup/a'}]
-        payload = self.report(extra=extra, skipped_datasets=datasets)
+        payload = self.report(extra={**extra, 'skipped_datasets': datasets})
         extra['remotes'][0]['name'] = 'changed'
         datasets[0]['source'] = 'changed'
         self.assertEqual(payload['remotes'][0]['name'], 'Cloud')
@@ -136,7 +141,7 @@ class TransportTests(unittest.TestCase):
             self.assertEqual(m.publish_report(cfg, self.report).status, 'skipped')
             run.assert_not_called()
             failure = m.build_report(name='NAS backup', job='nas-backup', exit_code=12)
-            self.assertTrue(m.publish_report(cfg, failure).sent)
+            self.assertEqual(m.publish_report(cfg, failure).status, 'sent')
             self.assertEqual(json.loads(run.call_args.kwargs['input'])['report']['exit_code'], 12)
 
     def test_preview_suppression_is_independent(self):

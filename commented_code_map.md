@@ -69,7 +69,7 @@ Why: cleanup/quota decisions can be calculated from one live snapshot instead of
 
 ### `RemoteSnapshot`
 
-In-memory mapping of normalized relative path to `RemoteFile` for one remote root.
+In-memory mapping of overridden relative path to `RemoteFile` for one remote root.
 
 Why: one recursive listing can be reused by all cleanup decisions in a phase.
 
@@ -226,7 +226,7 @@ Why: rclone option arrays must remain tokenized safely without shell parsing.
 
 ### `parse_cleanup_rules(section_name, raw_upload)`
 
-Parses each upload-owned cleanup rule, normalizes its path, rejects duplicate normalized paths, validates optional size limits, and preserves nullable overrides.
+Parses each upload-owned cleanup rule, normalizes its path, rejects duplicate overridden paths, validates optional size limits, and preserves nullable overrides.
 
 Why: cleanup ownership and inheritance are resolved deterministically.
 
@@ -239,6 +239,8 @@ It rejects application-reserved flags inside `copy_options`, including `--max-tr
 Why: users cannot accidentally recreate the transfer-limit failure, override dedicated runtime settings, delete intentionally skipped sync paths, or launch destructive workers concurrently for an identical destination.
 
 ### `load_config(config_path_text)`
+
+For live-enabled configs reject explicit log-file/syslog redirects before any lock/command, since they would remove the statistics stream from this reader.
 
 Loads the complete config into `STATE`, including root `script_name`, `comment`, independent template `completion` / `live` settings, and validates thread limits, configured path strings, and strict rejection of unsupported keys at every config level. This is configuration validation, not a broker/remote connectivity or source-content check. It also fully parses `delete_min_age` before assigning runtime state, so `--validate-config` catches invalid age/duration values instead of deferring the error until cleanup planning.
 
@@ -340,7 +342,7 @@ Why: external commands are executed without shell interpolation and can optional
 
 Checks captured stdout/stderr for rclone's `directory not found` text.
 
-Why: retained compatibility helper for callers that need to distinguish a missing remote directory from a different command failure.
+Why: A remote directory that has not been created yet is an empty snapshot; other command failures must remain errors.
 
 ## `rclone_backend.py`
 
@@ -555,6 +557,8 @@ Why: concurrent rclone output remains readable and attributed to the correct rem
 
 ### `run_command_streamed(command, thread_number, remote_path)`
 
+After an actual Popen launch, start the per-process meter, consume valid statistics lines without retaining them as failures, and always finish the meter/close stdout as the process reader unwinds. Preserve the original command return code and ordinary diagnostics.
+
 Check the cancellation fence immediately before Popen; retain the original streamed output and return behavior. The CLI supervisor owns this subprocess group and stops it during cancellation.
 
 Starts the upload process with merged stdout/stderr, streams lines live, captures them for later error reporting, and returns `(return_code, output)`.
@@ -575,11 +579,19 @@ Why: `--files-from0` safely carries exact paths including whitespace or comment-
 
 ### `upload_one_directory(job_number, upload)`
 
+With live enabled, append explicit final values for rclone logging/progress/statistics display flags for structured one-second samples. Transfer options, delete modes, exact lists and quota decisions remain unchanged.
+
 Validates the local source and upload command, adds sync delete-mode options when applicable, and for quota-managed uploads replaces source-selection filters with the generated exact `--files-from0` list while preserving non-filter options and configured buffer size. If quota planning selected zero files because the newest file already reached the cutoff, the upload stage succeeds as a no-op and starts no rclone upload command or upload-stage backend lookup. Otherwise it never adds `--max-transfer` or `--cutoff-mode`. Non-zero rclone status remains a real upload failure. Immediately before a trash-mode `sync` starts, it records that the upload stage may create script-managed trash, including partial work before a failure.
 
 Why: the program, not rclone's transfer ceiling, decides the successful complete-file upload set; partial/error return codes are never relabeled as success.
 
 ## `phases.py`
+
+### `run_remote_workers(uploads, workers, operation, *args, stage, label, error_prefix, skip_upload_on_error=False)`
+
+Submit the ordered eligible destination list to StopAwareExecutor, join every future, and return its per-destination result map. A normal exception records the correct summary stage failure and error label; preparation/trash failures also skip their upload prerequisite when requested. KeyboardInterrupt/SystemExit propagate to the existing cancellation-aware executor.
+
+Why: All six stage pools use the same failure isolation and joining code while phase callers retain their original worker limits, candidate selection and complete global barriers. No later stage starts until this helper returns.
 
 ### `print_snapshot_summary(job_number, snapshot_name, upload, snapshot)`
 
@@ -741,7 +753,7 @@ Why: concurrent work ends with one deterministic readable summary.
 
 ## `mqtt.py`
 
-`_stage_errors()` sanitizes and flattens stage failures. `build_result_payload()` calls the template's `build_report()` with rclone identity, authoritative integer exit code, diagnostic tail, warnings and run ID. Rclone fields remain as extensions: event, script/application identity, failed remotes and detailed remote results. It emits no Syncerate dataset sections.
+`_stage_errors()` sanitizes and flattens stage failures. `build_result_payload()` calls the template's `build_report()` with rclone identity, authoritative integer exit code, diagnostic tail, warnings and run ID. Rclone fields remain as extensions: event, failed remotes, detailed remote results and progress. It emits no Syncerate dataset sections.
 
 `publish_final_result()` applies the enabled gate and logs sanitized sent/skipped/failed delivery without replacing the job's code. Success filtering belongs to the completion config only.
 
@@ -785,12 +797,6 @@ Walk dictionary keys and list children and reject unsupported Python values.
 
 Why: Python serialization must not silently coerce non-string keys or application-only objects into the report.
 
-### `_dataset_list(...)`
-
-Validate an optional sequence of mappings and detach the top-level objects into a list.
-
-Why: Explicit dataset extensions must be arrays of objects; omitted diagnostics must remain omitted.
-
 ### `build_report(...)`
 
 Build all standard typed completion fields, derive status from the integer code, add allowed extensions, and JSON-round-trip the report.
@@ -808,12 +814,6 @@ Why: Mutated or manually created inconsistent reports must not be sent as valid 
 Validate switches, host/topic/port/QoS, finite positive timeout, authentication and paired TLS certificate options.
 
 Why: Misconfigured notification settings must be rejected before a publisher can run.
-
-### `PublishResult.sent(...)`
-
-Return whether the local delivery status equals sent.
-
-Why: Consumers can inspect transport completion without confusing it with the backup/upload success code.
 
 ### `publish_report(...)`
 
@@ -881,6 +881,8 @@ Why: HA must discover usable entities while treating ongoing state and retained 
 
 ### `LivePreview.__init__(...)`
 
+Accept an optional callable before_publish callback; validate it and retain it as local state only. It is not an MQTT config option or serialized field.
+
 Validate run identity and initialize locks, wake/stop events, process tracking, timestamps and unknown measurements.
 
 Why: Each run needs isolated state and must not invent transfer totals or a successful outcome before work happens.
@@ -915,12 +917,6 @@ Validate and detach supplied progress fields and the optional JSON-object detail
 
 Why: Job threads must update local memory quickly while keeping counters and typed JSON truthful.
 
-### `LivePreview.record_dataset(...)`
-
-Replace a source/destination pair's previous outcome, update the selected result list/count, and wake publishing.
-
-Why: Retries should reflect current per-item outcomes rather than count the same dataset repeatedly.
-
 ### `LivePreview.append_stderr(...)`
 
 Decode bytes when needed, retain a 4,000-character diagnostic tail, and wake the daemon.
@@ -952,6 +948,8 @@ Pass config/messages to a private publisher subprocess via stdin, enforce its ti
 Why: DNS/network stalls and optional dependencies must stay isolated from job execution; credentials do not belong in process arguments.
 
 ### `LivePreview._worker(...)`
+
+Immediately before snapshotting a batch, invoke before_publish outside the live lock; ignore callback errors so publishing/outcomes remain independent. This refreshes stalled speeds on heartbeats without another poller.
 
 Coalesce changes, send heartbeats and periodic discovery, and drain final state/retained results with the proper retention policy.
 
@@ -1035,27 +1033,31 @@ Why: Final details must not leave ghost running workers or invent successful wor
 
 ### `remote_progress(...)`
 
+Merge transfer_snapshot fields for that destination, including measured bytes/rate, upload duration/average, sample availability and stale-speed state.
+
 Also derive activity labels/counts from this destination's RUNNING observations. Trash IDs get their own category while retaining the original cleanup kind. Idle and finished rows expose no stale active operation.
 
 Why: The overview must show which part each worker is doing, without changing worker scheduling.
 
-Snapshot a destination's complete ordered step table, counts/current operations, per-cleanup-path pre/post counters, summary stages, diagnostics and error flags while the caller owns the results lock.
+Snapshot a destination's complete ordered step table, counts/current operations, per-cleanup-path pre/post counters, measured transfer fields, diagnostics and error flags while the caller owns the results lock.
 
 Why: Each destination needs its own consistent view, independent of the last reporting worker.
 
 ### `progress_snapshot_locked(...)`
 
+Sum transferred bytes and current rates across the same locked destination snapshots. Retain null for an unknown launched-worker metric, and zero for finished/unlaunched current speed.
+
 Also sum activity counts across the same destination snapshot and build the top readable activity summary. Upload, ordinary cleanup and trash cleanup remain distinguishable when different destinations are active.
 
 Why: The run overview must represent every active destination rather than whichever thread last updated a field.
 
-Build all destination snapshots once and sum their fixed totals and settled/running/failure/skip counts, retaining the four-stage counters.
+Build all destination snapshots once and sum their fixed totals, settled/running/failure/skip counts and measured bytes/rates. No duplicate four-stage progress counters are emitted.
 
 Why: One atomic details object must agree with the whole-run counters and report every active worker.
 
 ## `reporting.py`
 
-`start_reporting()` creates a fresh run ID and starts an enabled live monitor after the caller owns the lock. `update_live()` applies global phase/current-remote updates. `refresh_live()` snapshots stage outcomes under locks, counts settled stages and maps local/remote jobs to the template's outcome arrays. The adapter lock orders concurrent snapshots and updates to prevent progress moving backward.
+`start_reporting()` creates a fresh run ID and starts an enabled live monitor after the caller owns the lock. `update_live()` applies global phase/current-remote updates. `refresh_live()` snapshots detailed steps and stage outcomes under locks, counts settled steps and maps local/remote jobs to the template's outcome arrays. The adapter lock orders concurrent snapshots and updates to prevent progress moving backward.
 
 `append_diagnostics()` keeps a shared sanitized 4,000-character diagnostic tail for both channels. `sanitize()` removes configured MQTT passwords and common credential flags. `finish_live()` refreshes outcomes, finalizes with the real code/error/warnings/interrupt marker and closes the monitor.
 
@@ -1086,6 +1088,8 @@ Forward global phase/current-item fields to the optional local monitor with non-
 Why: Progress observations must never become a prerequisite for upload/cleanup work.
 
 ### `refresh_live(...)`
+
+Update the standard transferred_bytes/bytes_per_second atomically with counters and detailed per-destination observations. The live publisher invokes this local refresh before each packet/heartbeat.
 
 Serialize concurrent snapshots under adapter/result locks, use progress_snapshot_locked for all destination counters/current operations, and map authoritative stage outcomes to live result lists. The keyword-only clear_current flag clears the summary at finish; ignored positional labels are not supported.
 
@@ -1151,7 +1155,7 @@ Why: handled termination should not leave a stale lock behind.
 
 ### `main()`
 
-Reset per-invocation cancellation, register SIGINT/SIGTERM/SIGHUP/SIGQUIT handling, preserve signal exit codes and interrupted outcomes, and clear cancellation after final reporting/lock release. The compatibility CLI calls this inside supervised_main; direct library calls do not install the outer supervisor.
+Reset per-invocation cancellation, register SIGINT/SIGTERM/SIGHUP/SIGQUIT handling, preserve signal exit codes and interrupted outcomes, and clear cancellation after final reporting/lock release. The CLI entry point calls this inside supervised_main; direct library calls do not install the outer supervisor.
 
 Top-level application orchestration:
 
@@ -1359,9 +1363,9 @@ Check live has dataset lists and counts.
 
 Why: Detect regressions in this behavior using offline assertions against the actual implementation.
 
-### `LiveTests.test_dataset_retries_replace_previous_outcome_and_keep_reasons(...)`
+### `LiveTests.test_bulk_dataset_reclassification_replaces_counts_and_keeps_reasons(...)`
 
-Check dataset retries replace previous outcome and keep reasons.
+Replace live outcome groups through the bulk update API; counts must match current lists and skipped reasons must survive.
 
 Why: Detect regressions in this behavior using offline assertions against the actual implementation.
 
@@ -1848,6 +1852,24 @@ Why: The single-flight cache must run one calculation for identical concurrent s
 Capture the generated exact-file upload command and list.
 
 Why: Quota-selected uploads must reuse their frozen file list without transfer-cap flags.
+
+### `StageWorkerTests.test_all_stage_crashes_still_isolate_destinations_and_skip_only_dependents(...)`
+
+Run all six stage crash cases with two destinations. Verify the failed destination receives the correct stage failure, its upload prerequisites are skipped where required, and the independent destination still runs.
+
+Why: Preserve stage failure isolation, barrier behavior and shutdown fencing while removing repeated worker-pool code.
+
+### `StageWorkerTests.test_all_stage_crashes_still_isolate_destinations_and_skip_only_dependents.perform(...)`
+
+Record job numbering and destination identity, fail only destination A, and let B complete so the actual phase runner must isolate the exception.
+
+Why: Preserve stage failure isolation, barrier behavior and shutdown fencing while removing repeated worker-pool code.
+
+### `StageWorkerTests.test_shared_runner_propagates_cancellation_and_accepts_empty_barriers(...)`
+
+Verify an empty eligible list launches no operation, KeyboardInterrupt is propagated instead of recorded as an ordinary worker failure, and the stop-aware executor sets cancellation. Always reset the cancellation event for other tests.
+
+Why: Preserve stage failure isolation, barrier behavior and shutdown fencing while removing repeated worker-pool code.
 
 ## `tests/test_mqtt_status.py`
 
@@ -2549,9 +2571,9 @@ Start/finish a transfer observation and settle the run; verify no running activi
 
 Why: Finished progress must never suggest that an upload is still active.
 
-### `ParallelProgressTests.test_overview_accepts_older_details_and_escapes_configured_names(...)`
+### `ParallelProgressTests.test_overview_escapes_configured_names_with_current_details(...)`
 
-Render a prior detailed payload without the new activity metadata and a name containing a pipe, HTML and a newline. Check fallback activity/phase and safe single-cell text.
+Render a current detailed packet with its activity fields and a name containing a pipe, HTML and a newline. Check current activity/phase and safe single-cell text.
 
 Why: Updated cards must support prior payloads and preserve Markdown table structure for user names.
 
@@ -2777,3 +2799,141 @@ Why: Verify process ownership/cancellation using offline fixtures rather than pr
 Let transfers succeed while harmless descendants linger, then require normal-exit cleanup to stop them.
 
 Why: Verify process ownership/cancellation using offline fixtures rather than production services or unrelated processes.
+
+## `transfer_stats.py`
+
+### `live_stats_options(...)`
+
+Own display/logging flags when live reporting needs JSON stats on stderr.
+
+Why: Keep per-destination measurement/aggregation observational, independent from transfer/deletion decisions and MQTT transport.
+
+### `start_transfer(...)`
+
+Mark an actually launched upload; unknown counters stay unknown until sampled.
+
+Why: Keep per-destination measurement/aggregation observational, independent from transfer/deletion decisions and MQTT transport.
+
+### `finish_transfer(...)`
+
+Freeze the worker duration and stop advertising its final speed as current.
+
+Why: Keep per-destination measurement/aggregation observational, independent from transfer/deletion decisions and MQTT transport.
+
+### `record_transfer_stats(...)`
+
+Consume valid cumulative bytes/speed/elapsedTime; reject invalid/stale samples.
+
+Why: Keep per-destination measurement/aggregation observational, independent from transfer/deletion decisions and MQTT transport.
+
+### `transfer_snapshot(...)`
+
+Read locked counters with independent duration/average and stale-speed handling.
+
+Why: Keep per-destination measurement/aggregation observational, independent from transfer/deletion decisions and MQTT transport.
+
+## `tests/test_transfer_stats.py`
+
+### `sample(...)`
+
+Serialize one synthetic rclone stats line with controlled cumulative bytes, speed and elapsed time.
+
+Why: Exercise real counters, output readers, HA templates or the real CLI with harmless local fixtures and fake broker helpers; avoid production data/services.
+
+### `wait_for(...)`
+
+Poll a test predicate to a short monotonic deadline so subprocess and heartbeat assertions have bounded waits.
+
+Why: Exercise real counters, output readers, HA templates or the real CLI with harmless local fixtures and fake broker helpers; avoid production data/services.
+
+### `TransferStatsTests.setUp(...)`
+
+Save shared state, create harmless temporary sources and initialize independent destination counters before each metric test.
+
+Why: Exercise real counters, output readers, HA templates or the real CLI with harmless local fixtures and fake broker helpers; avoid production data/services.
+
+### `TransferStatsTests.tearDown(...)`
+
+Close the local live fixture, remove temporary sources and restore shared state so later tests are isolated.
+
+Why: Exercise real counters, output readers, HA templates or the real CLI with harmless local fixtures and fake broker helpers; avoid production data/services.
+
+### `TransferStatsTests.test_cumulative_samples_are_independent_and_combined_without_double_counting(...)`
+
+Verify cumulative samples are independent and combined without double counting.
+
+Why: Exercise real counters, output readers, HA templates or the real CLI with harmless local fixtures and fake broker helpers; avoid production data/services.
+
+### `TransferStatsTests.test_invalid_packets_never_replace_measured_counters(...)`
+
+Verify invalid packets never replace measured counters.
+
+Why: Exercise real counters, output readers, HA templates or the real CLI with harmless local fixtures and fake broker helpers; avoid production data/services.
+
+### `TransferStatsTests.test_stale_active_speed_becomes_unknown_and_finished_speed_is_zero(...)`
+
+Verify stale active speed becomes unknown and finished speed is zero.
+
+Why: Exercise real counters, output readers, HA templates or the real CLI with harmless local fixtures and fake broker helpers; avoid production data/services.
+
+### `TransferStatsTests.test_live_logging_flags_are_owned_without_changing_transfer_filters(...)`
+
+Verify live logging flags are owned without changing transfer filters.
+
+Why: Exercise real counters, output readers, HA templates or the real CLI with harmless local fixtures and fake broker helpers; avoid production data/services.
+
+### `TransferStatsTests.test_redirecting_logs_is_rejected_before_lock_or_commands(...)`
+
+Verify redirecting logs is rejected before lock or commands.
+
+Why: Exercise real counters, output readers, HA templates or the real CLI with harmless local fixtures and fake broker helpers; avoid production data/services.
+
+### `TransferStatsTests.test_stream_stats_are_not_failure_diagnostics_and_failure_keeps_partial_bytes(...)`
+
+Verify stream stats are not failure diagnostics and failure keeps partial bytes.
+
+Why: Exercise real counters, output readers, HA templates or the real CLI with harmless local fixtures and fake broker helpers; avoid production data/services.
+
+### `TransferStatsTests.test_monitor_failure_does_not_break_stats_reader_or_stream_exit(...)`
+
+Verify monitor failure does not break stats reader or stream exit.
+
+Why: Exercise real counters, output readers, HA templates or the real CLI with harmless local fixtures and fake broker helpers; avoid production data/services.
+
+### `TransferStatsTests.test_heartbeat_refreshes_delayed_speed_without_new_worker_output(...)`
+
+Verify heartbeat refreshes delayed speed without new worker output.
+
+Why: Exercise real counters, output readers, HA templates or the real CLI with harmless local fixtures and fake broker helpers; avoid production data/services.
+
+### `TransferStatsTests.test_heartbeat_refreshes_delayed_speed_without_new_worker_output.capture(...)`
+
+Collect a publisher batch and signal the test waiter; simulate broker success without network traffic.
+
+Why: Exercise real counters, output readers, HA templates or the real CLI with harmless local fixtures and fake broker helpers; avoid production data/services.
+
+### `TransferStatsTests.test_card_moves_combined_metrics_to_top_and_shows_each_destination(...)`
+
+Verify card moves combined metrics to top and shows each destination.
+
+Why: Exercise real counters, output readers, HA templates or the real CLI with harmless local fixtures and fake broker helpers; avoid production data/services.
+
+### `TransferStatsTests.test_real_cli_three_streams_publish_bytes_and_rates_through_fake_paho(...)`
+
+Verify real cli three streams publish bytes and rates through fake paho.
+
+Why: Exercise real counters, output readers, HA templates or the real CLI with harmless local fixtures and fake broker helpers; avoid production data/services.
+
+### `TransferStatsTests.test_real_cli_three_streams_publish_bytes_and_rates_through_fake_paho.packets(...)`
+
+Read captured fake-broker JSON lines and extract valid live state objects for the concurrent CLI assertions.
+
+Why: Exercise real counters, output readers, HA templates or the real CLI with harmless local fixtures and fake broker helpers; avoid production data/services.
+
+The card's byte_size macro formats byte counts with binary units; speed_text reuses it for per-second rates and preserves Unknown. Combined average uses measured total bytes / standard runtime_seconds, while each upload average uses its own frozen process duration. The card fields stay under manufacturer/role lookup with no fixed destination list.
+
+Live-mode upload commands use --use-json-log, --stats=1s, --stats-log-level=NOTICE, --log-level=NOTICE, --progress=false, --quiet=false, --log-file= and --syslog=false to retain structured stderr statistics. These affect logging/display, not file selection or transfer/deletion commands. Explicit copy_options redirections are rejected by load_config. No RC endpoint or additional polling process is started.
+
+Current progress fields: progress_snapshot_locked returns only detailed workflow counters and measured aggregate metrics; remote_progress returns detailed steps, cleanup jobs, activity and transfer metrics. Summary stages remain authoritative internal results and completion remotes[].stages. No completed_stages/total_stages or duplicate live row stages are emitted. The card uses the current activity fields and failure spelling directly. Manufacturer and role discovery, pre-first-state entity lookup and expired-heartbeat handling remain necessary current behavior.
+
+The rclone completion builder uses validated extra metadata instead of template-only dataset arguments. Live outcome groups use LivePreview.update atomically. PublishResult.status is the transport status; it stays separate from the job exit code.

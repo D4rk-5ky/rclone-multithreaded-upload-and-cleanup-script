@@ -342,6 +342,13 @@ def load_config(config_path_text: str):
         raise ValueError("root.script_name must be a non-empty string")
     completion_config = parse_completion_config(config, config_path.resolve().parent)
     live_config = parse_live_config(config, config_path)
+    if live_config.enabled:
+        from .transfer_stats import REDIRECT_OPTIONS
+        from .reservation import split_copy_options
+        for upload in uploads:
+            for option in split_copy_options(upload)[1]:
+                if option.split("=", 1)[0] in REDIRECT_OPTIONS:
+                    raise ValueError(f"{option.split('=', 1)[0]} redirects transfer stats; remove it when live.enabled=true")
     comment = config.get("comment", "")
     if not isinstance(comment, str):
         raise ValueError("root.comment must be a string")

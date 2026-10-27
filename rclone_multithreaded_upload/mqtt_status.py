@@ -15,7 +15,7 @@ import socket
 import ssl
 import subprocess
 import sys
-from typing import Any, Mapping, Sequence
+from typing import Any, Mapping
 import uuid
 
 __version__ = "1.1.0"
@@ -48,19 +48,6 @@ def _json_text(value: Any) -> str:
     return encoded
 
 
-def _dataset_list(values: Sequence[Mapping[str, Any]] | None) -> list[dict[str, Any]]:
-    if values is None:
-        return []
-    if isinstance(values, (str, bytes, dict)):
-        raise ValueError("Dataset details must be a sequence of objects")
-    result = []
-    for item in values:
-        if not isinstance(item, Mapping):
-            raise ValueError("Each dataset detail must be an object")
-        result.append(dict(item))
-    return result
-
-
 def build_report(
     *,
     name: str,
@@ -75,9 +62,6 @@ def build_report(
     comment: str = "",
     version: str = "",
     run_id: str | None = None,
-    skipped_datasets: Sequence[Mapping[str, Any]] | None = None,
-    failed_datasets: Sequence[Mapping[str, Any]] | None = None,
-    planned_datasets: Sequence[Mapping[str, Any]] | None = None,
     extra: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build a detached JSON-compatible dictionary.
@@ -114,13 +98,6 @@ def build_report(
         "host": socket.gethostname(),
         "run_id": _text(run_id if run_id is not None else str(uuid.uuid4()), "run_id", nonempty=True),
     }
-    # Dataset diagnostics belong to adapters such as Syncerate, not the generic
-    # completion contract. Omitted means absent; an explicit [] is preserved.
-    for key, values in (("planned_datasets", planned_datasets),
-                        ("skipped_datasets", skipped_datasets),
-                        ("failed_datasets", failed_datasets)):
-        if values is not None:
-            report[key] = _dataset_list(values)
     if extra is not None:
         if not isinstance(extra, Mapping):
             raise ValueError("extra must be an object")
@@ -209,10 +186,6 @@ class MQTTConfig:
 class PublishResult:
     status: str  # sent, skipped, failed (delivery status, never the job status)
     reason: str
-
-    @property
-    def sent(self) -> bool:
-        return self.status == "sent"
 
 
 def publish_report(config: MQTTConfig, report: Mapping[str, Any]) -> PublishResult:

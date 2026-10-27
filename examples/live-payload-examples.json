@@ -7,11 +7,11 @@
   "run_id": "synthetic-live-example",
   "manufacturer": "rclone-multithreaded-upload",
   "host": "darkyere-VirtualBox",
-  "version": "0.0.35",
+  "version": "0.0.37",
   "dry_run": false,
-  "started_at": "2026-10-27T14:17:02.820615+00:00",
-  "last_heartbeat": "2026-10-27T14:17:02.843320+00:00",
-  "runtime_seconds": 0.02,
+  "started_at": "2026-10-27T18:02:30.489002+00:00",
+  "last_heartbeat": "2026-10-27T18:02:30.529215+00:00",
+  "runtime_seconds": 10,
   "status": "running",
   "success": null,
   "exit_code": null,
@@ -20,8 +20,8 @@
   "completed": 14,
   "total": 35,
   "progress_percent": 40.0,
-  "transferred_bytes": null,
-  "bytes_per_second": null,
+  "transferred_bytes": 629145600,
+  "bytes_per_second": 62914560.0,
   "successful_datasets": [],
   "failed_datasets": [],
   "skipped_datasets": [],
@@ -37,6 +37,8 @@
     "schema_version": 1,
     "unit": "steps",
     "destination_count": 3,
+    "transferred_bytes": 629145600,
+    "bytes_per_second": 62914560.0,
     "activity_counts": {
       "Upload": 3
     },
@@ -47,8 +49,6 @@
     "running": 3,
     "failed": 0,
     "skipped": 4,
-    "completed_stages": 3,
-    "total_stages": 12,
     "remote_jobs": [
       {
         "name": "OneDrive",
@@ -79,8 +79,8 @@
             "activity": "Snapshot",
             "status": "SUCCESS",
             "error": "",
-            "started_at": "2026-10-27T14:17:02.820703+00:00",
-            "finished_at": "2026-10-27T14:17:02.821352+00:00"
+            "started_at": "2026-10-27T18:02:30.489111+00:00",
+            "finished_at": "2026-10-27T18:02:30.490005+00:00"
           },
           {
             "id": "pre_delete",
@@ -90,8 +90,8 @@
             "activity": "Cleanup",
             "status": "SKIPPED",
             "error": "No deletion/trash activity in this synthetic example",
-            "started_at": "2026-10-27T14:17:02.822052+00:00",
-            "finished_at": "2026-10-27T14:17:02.822694+00:00"
+            "started_at": "2026-10-27T18:02:30.490888+00:00",
+            "finished_at": "2026-10-27T18:02:30.491738+00:00"
           },
           {
             "id": "upload",
@@ -101,7 +101,7 @@
             "activity": "Upload",
             "status": "RUNNING",
             "error": "",
-            "started_at": "2026-10-27T14:17:02.841081+00:00",
+            "started_at": "2026-10-27T18:02:30.516920+00:00",
             "finished_at": null
           },
           {
@@ -150,15 +150,15 @@
           }
         ],
         "cleanup_jobs": [],
-        "stages": {
-          "reservation": "SUCCESS",
-          "upload": "PENDING",
-          "post_cleanup": "PENDING",
-          "final_quota": "PENDING"
-        },
         "stderr": "",
         "error": "",
-        "has_failures": false
+        "has_failures": false,
+        "transferred_bytes": 104857600,
+        "bytes_per_second": 10485760.0,
+        "average_bytes_per_second": 10485760.0,
+        "transfer_elapsed_seconds": 10,
+        "transfer_stats_received": true,
+        "transfer_stats_stale": false
       },
       {
         "name": "GDrive",
@@ -189,8 +189,8 @@
             "activity": "Snapshot",
             "status": "SUCCESS",
             "error": "",
-            "started_at": "2026-10-27T14:17:02.823955+00:00",
-            "finished_at": "2026-10-27T14:17:02.824652+00:00"
+            "started_at": "2026-10-27T18:02:30.493389+00:00",
+            "finished_at": "2026-10-27T18:02:30.494317+00:00"
           },
           {
             "id": "local_snapshot",
@@ -200,8 +200,8 @@
             "activity": "Snapshot",
             "status": "SUCCESS",
             "error": "",
-            "started_at": "2026-10-27T14:17:02.825644+00:00",
-            "finished_at": "2026-10-27T14:17:02.826438+00:00"
+            "started_at": "2026-10-27T18:02:30.495226+00:00",
+            "finished_at": "2026-10-27T18:02:30.496122+00:00"
           },
           {
             "id": "pre_rule:gdrive:Archive/",
@@ -211,8 +211,8 @@
             "activity": "Cleanup",
             "status": "SUCCESS",
             "error": "",
-            "started_at": "2026-10-27T14:17:02.826975+00:00",
-            "finished_at": "2026-10-27T14:17:02.827362+00:00"
+            "started_at": "2026-10-27T18:02:30.497020+00:00",
+            "finished_at": "2026-10-27T18:02:30.497890+00:00"
           },
           {
             "id": "reservation",
@@ -222,8 +222,8 @@
             "activity": "Quota planning",
             "status": "SUCCESS",
             "error": "",
-            "started_at": "2026-10-27T14:17:02.827870+00:00",
-            "finished_at": "2026-10-27T14:17:02.828287+00:00"
+            "started_at": "2026-10-27T18:02:30.498743+00:00",
+            "finished_at": "2026-10-27T18:02:30.499611+00:00"
           },
           {
             "id": "pre_delete",
@@ -233,8 +233,8 @@
             "activity": "Cleanup",
             "status": "SKIPPED",
             "error": "No deletion/trash activity in this synthetic example",
-            "started_at": "2026-10-27T14:17:02.828706+00:00",
-            "finished_at": "2026-10-27T14:17:02.829272+00:00"
+            "started_at": "2026-10-27T18:02:30.500422+00:00",
+            "finished_at": "2026-10-27T18:02:30.501263+00:00"
           },
           {
             "id": "upload",
@@ -244,7 +244,7 @@
             "activity": "Upload",
             "status": "RUNNING",
             "error": "",
-            "started_at": "2026-10-27T14:17:02.841820+00:00",
+            "started_at": "2026-10-27T18:02:30.518084+00:00",
             "finished_at": null
           },
           {
@@ -326,15 +326,15 @@
             "post_status": "PENDING"
           }
         ],
-        "stages": {
-          "reservation": "SUCCESS",
-          "upload": "PENDING",
-          "post_cleanup": "PENDING",
-          "final_quota": "PENDING"
-        },
         "stderr": "",
         "error": "",
-        "has_failures": false
+        "has_failures": false,
+        "transferred_bytes": 209715200,
+        "bytes_per_second": 20971520.0,
+        "average_bytes_per_second": 20971520.0,
+        "transfer_elapsed_seconds": 10,
+        "transfer_stats_received": true,
+        "transfer_stats_stale": false
       },
       {
         "name": "Mega",
@@ -365,8 +365,8 @@
             "activity": "Snapshot",
             "status": "SUCCESS",
             "error": "",
-            "started_at": "2026-10-27T14:17:02.830892+00:00",
-            "finished_at": "2026-10-27T14:17:02.831801+00:00"
+            "started_at": "2026-10-27T18:02:30.503072+00:00",
+            "finished_at": "2026-10-27T18:02:30.504009+00:00"
           },
           {
             "id": "local_snapshot",
@@ -376,8 +376,8 @@
             "activity": "Snapshot",
             "status": "SUCCESS",
             "error": "",
-            "started_at": "2026-10-27T14:17:02.832676+00:00",
-            "finished_at": "2026-10-27T14:17:02.833247+00:00"
+            "started_at": "2026-10-27T18:02:30.504859+00:00",
+            "finished_at": "2026-10-27T18:02:30.505700+00:00"
           },
           {
             "id": "pre_rule:mega:Archive/",
@@ -387,8 +387,8 @@
             "activity": "Cleanup",
             "status": "SUCCESS",
             "error": "",
-            "started_at": "2026-10-27T14:17:02.833907+00:00",
-            "finished_at": "2026-10-27T14:17:02.834311+00:00"
+            "started_at": "2026-10-27T18:02:30.506525+00:00",
+            "finished_at": "2026-10-27T18:02:30.507369+00:00"
           },
           {
             "id": "pre_rule:mega:Archive/Camera",
@@ -398,8 +398,8 @@
             "activity": "Cleanup",
             "status": "SUCCESS",
             "error": "",
-            "started_at": "2026-10-27T14:17:02.834708+00:00",
-            "finished_at": "2026-10-27T14:17:02.835222+00:00"
+            "started_at": "2026-10-27T18:02:30.508255+00:00",
+            "finished_at": "2026-10-27T18:02:30.509086+00:00"
           },
           {
             "id": "reservation",
@@ -409,8 +409,8 @@
             "activity": "Quota planning",
             "status": "SUCCESS",
             "error": "",
-            "started_at": "2026-10-27T14:17:02.835956+00:00",
-            "finished_at": "2026-10-27T14:17:02.836703+00:00"
+            "started_at": "2026-10-27T18:02:30.509924+00:00",
+            "finished_at": "2026-10-27T18:02:30.510780+00:00"
           },
           {
             "id": "pre_delete",
@@ -420,8 +420,8 @@
             "activity": "Cleanup",
             "status": "SKIPPED",
             "error": "No deletion/trash activity in this synthetic example",
-            "started_at": "2026-10-27T14:17:02.837431+00:00",
-            "finished_at": "2026-10-27T14:17:02.838219+00:00"
+            "started_at": "2026-10-27T18:02:30.511773+00:00",
+            "finished_at": "2026-10-27T18:02:30.512830+00:00"
           },
           {
             "id": "pre_trash",
@@ -431,8 +431,8 @@
             "activity": "Trash cleanup",
             "status": "SKIPPED",
             "error": "No deletion/trash activity in this synthetic example",
-            "started_at": "2026-10-27T14:17:02.838954+00:00",
-            "finished_at": "2026-10-27T14:17:02.839655+00:00"
+            "started_at": "2026-10-27T18:02:30.513799+00:00",
+            "finished_at": "2026-10-27T18:02:30.514833+00:00"
           },
           {
             "id": "upload",
@@ -442,7 +442,7 @@
             "activity": "Upload",
             "status": "RUNNING",
             "error": "",
-            "started_at": "2026-10-27T14:17:02.842553+00:00",
+            "started_at": "2026-10-27T18:02:30.519328+00:00",
             "finished_at": null
           },
           {
@@ -556,15 +556,15 @@
             "post_status": "PENDING"
           }
         ],
-        "stages": {
-          "reservation": "SUCCESS",
-          "upload": "PENDING",
-          "post_cleanup": "PENDING",
-          "final_quota": "PENDING"
-        },
         "stderr": "",
         "error": "",
-        "has_failures": false
+        "has_failures": false,
+        "transferred_bytes": 314572800,
+        "bytes_per_second": 31457280.0,
+        "average_bytes_per_second": 31457280.0,
+        "transfer_elapsed_seconds": 10,
+        "transfer_stats_received": true,
+        "transfer_stats_stale": false
       }
     ]
   }

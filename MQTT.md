@@ -1,6 +1,6 @@
 # Syncerate template reporting for rclone-multithreaded-upload
 
-Version 0.0.35 uses the newly supplied template: completion module 1.1.0 and live-preview module 1.2.0. The completion wire contract and publisher worker are preserved; the unused JSON-string convenience builder is omitted; the live module has a backward-compatible optional JSON-object `details` extension for parallel progress. Both retain their standard contracts; `mqtt.py` and `reporting.py` adapt rclone results to them.
+Version 0.0.37 uses the supplied completion 1.1.0 and live-preview 1.2.0 JSON contracts. The local modules retain standard JSON validation, independent configuration and bounded publisher workers. Rclone adapters populate completion results and bulk live dataset groups. The live module accepts a JSON-object `details` extension and an optional local pre-publish callback for parallel progress/measurement updates. Template-only dataset builder arguments and per-item recording helpers are not exposed by this application; optional completion metadata goes through the validated `extra` object.
 
 ## Configure the channels independently
 
@@ -57,7 +57,7 @@ Every completion payload has these template fields:
 | `warning` | Boolean; true if any remote's overall result was skipped. Warnings do not rewrite the result code. |
 | `schema_version` | Integer 1. |
 | `comment` | Optional root `comment` string, default empty. |
-| `version` | Application version, currently `"0.0.35"`. |
+| `version` | Application version, currently `"0.0.37"`. |
 | `timestamp`, `host`, `run_id` | UTC report timestamp, local hostname, unique run identifier. Both enabled channels share the run ID. |
 
 Rclone extensions are `event`, `failed_remotes`, `remotes` and overall `progress`. Identity/version use the standard `name`, `job` and `version` fields. Each remote retains its name, path, status, four stage statuses, and structured stage errors. It also has a `progress` object with its own planned steps/counts/current operations; a top-level `progress` object contains the overall totals. These are non-conflicting application extensions. Generic completion events omit Syncerate dataset sections; rclone diagnostics use `remotes`. See `payload-examples.json` for full success and failure examples.
@@ -100,8 +100,10 @@ Manufacturer recognition applies to the live Markdown card, independently of the
 
 Standard completion fields and notification automation are unchanged. Live `completed`/`total` now count detailed workflow steps instead of four coarse summary stages per remote. An atomic `details` object contains every destination and its independent step list/current operations/counters. Manufacturer discovery still finds the run device; its status and retained-result attributes contain the full concurrent progress without creating a separate HA device for each worker.
 
-See `LIVE_PREVIEW.md`. The MQTT completion publisher remains separate from live preview, and either can be disabled independently. Byte/speed measurements remain Unknown rather than being estimated from selected/planned files.
+See `LIVE_PREVIEW.md`. The MQTT completion publisher remains separate from live preview, and either can be disabled independently. Measured bytes/speed are parsed from each upload process; unknown samples remain null and planned sizes are never used as measurements.
 
 On termination, final reporting is best-effort within the supervised five-second shutdown window. SIGKILL/forced shutdown cannot guarantee a final packet; heartbeat expiry still indicates loss of live updates. See [PROCESS_LIFECYCLE.md](PROCESS_LIFECYCLE.md).
 
 The single completion example file, `payload-examples.json`, contains `success` and `failure` objects. Each value is a separate valid completion packet; the outer wrapper is only for grouping the examples. The examples use one destination to keep them readable, while the producer supports any configured destination count. The separate `live-payload-examples.json` is one complete three-destination running packet. Neither sample is a configuration file or automatically loaded by the app.
+
+The live payload uses the existing standard transferred_bytes/bytes_per_second fields for aggregate metrics and runtime_seconds for the card's combined run average. Per-remote measurements and upload averages are in details.remote_jobs; final completion progress extensions retain the same counters. Completion status/success/exit_code and automation gates are unchanged. Live-mode JSON statistics flags and redirect-option restrictions are documented in README.md and LIVE_PREVIEW.md.

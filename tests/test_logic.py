@@ -1118,5 +1118,61 @@ class LogicTests(unittest.TestCase):
             )
 
 
+
+class StageWorkerTests(unittest.TestCase):
+    """Refactoring must preserve every barrier's error and prerequisite behavior."""
+
+    def test_all_stage_crashes_still_isolate_destinations_and_skip_only_dependents(self):
+        from rclone_multithreaded_upload import phases
+        cases = [
+            ("prepare_one_remote_for_upload", "reservation", "run_reservation_and_upload_phase"),
+            ("pre_upload_trash_cleanup_one_remote", "reservation", "run_reservation_and_upload_phase"),
+            ("upload_one_directory", "upload", "run_reservation_and_upload_phase"),
+            ("post_cleanup_plan_one_remote", "post_cleanup", "run_post_upload_cleanup_phase"),
+            ("post_upload_trash_cleanup_one_remote", "post_cleanup", "run_post_upload_cleanup_phase"),
+            ("verify_one_remote", "final_quota", "run_final_verification"),
+        ]
+        for operation, stage, runner in cases:
+            with self.subTest(operation=operation), StateSnapshot():
+                uploads = [UploadDirectory("/tmp", remote, [], []) for remote in ("a:root", "b:root")]
+                STATE.upload_directories = uploads
+                STATE.live_preview = None
+                initialize_run_results()
+                calls = []
+                def perform(index, upload, *args):
+                    calls.append((index, upload.remote_path))
+                    if upload.remote_path == "a:root":
+                        raise RuntimeError("stage crash")
+                    return True
+                with patch.object(phases, operation, side_effect=perform), \
+                     patch.object(phases, "fetch_remote_snapshot", side_effect=lambda remote: RemoteSnapshot(remote)), \
+                     patch.object(phases, "execute_delete_plan", return_value=True), \
+                     patch.object(phases, "cleanup_one_trash_remote", return_value=True), \
+                     patch.object(phases, "wait_or_cancel"), \
+                     patch.object(phases, "print_job_block"), patch.object(phases, "print_step"):
+                    # Other real per-destination operations use empty harmless snapshots.
+                    with patch("rclone_multithreaded_upload.upload.run_command_streamed", return_value=(0, "")):
+                        self.assertFalse(getattr(phases, runner)([]))
+                self.assertEqual(sorted(calls), [(1, "a:root"), (2, "b:root")])
+                self.assertEqual(getattr(STATE.run_results["a:root"], stage).status, "FAILED")
+                if stage == "reservation":
+                    self.assertEqual(STATE.run_results["a:root"].upload.status, "SKIPPED")
+                    self.assertEqual(STATE.run_results["b:root"].upload.status, "SUCCESS")
+
+    def test_shared_runner_propagates_cancellation_and_accepts_empty_barriers(self):
+        from rclone_multithreaded_upload import phases, process_lifecycle
+        operation = unittest.mock.Mock(side_effect=KeyboardInterrupt("stop"))
+        kwargs = dict(stage="upload", label="UPLOAD JOB", error_prefix="Upload worker crashed")
+        try:
+            process_lifecycle.reset_cancellation()
+            self.assertEqual(phases.run_remote_workers([], 1, operation, **kwargs), {})
+            operation.assert_not_called()
+            with self.assertRaises(KeyboardInterrupt), patch.object(phases, "record_stage_failure") as failed:
+                phases.run_remote_workers([UploadDirectory("/tmp", "a:root", [], [])], 1, operation, **kwargs)
+            failed.assert_not_called()
+            self.assertTrue(process_lifecycle.STOP_REQUESTED.is_set())
+        finally:
+            process_lifecycle.reset_cancellation()
+
 if __name__ == "__main__":
     unittest.main()
