@@ -1083,11 +1083,19 @@ Why: Final details must not leave ghost running workers or invent successful wor
 
 ### `remote_progress(...)`
 
+Also derive activity labels/counts from this destination's RUNNING observations. Trash IDs get their own category while retaining the original cleanup kind. Idle and finished rows expose no stale active operation.
+
+Why: The overview must show which part each worker is doing, without changing worker scheduling.
+
 Snapshot a destination's complete ordered step table, counts/current operations, per-cleanup-path pre/post counters, legacy stages, diagnostics and error flags while the caller owns the results lock.
 
 Why: Each destination needs its own consistent view, independent of the last reporting worker.
 
 ### `progress_snapshot_locked(...)`
+
+Also sum activity counts across the same destination snapshot and build the top readable activity summary. Upload, ordinary cleanup and trash cleanup remain distinguishable when different destinations are active.
+
+Why: The run overview must represent every active destination rather than whichever thread last updated a field.
 
 Build all destination snapshots once and sum their fixed totals and settled/running/failure/skip counts, retaining the legacy four-stage counters.
 
@@ -2446,6 +2454,12 @@ Close the monitor, remove temporary source data and restore runtime state/cache.
 
 Why: Concurrent fixtures must not leak state to other tests.
 
+### `ParallelProgressTests._render_snapshot(...)`
+
+Render the actual manufacturer card through the existing fake HA discovery registry, with renamed entity IDs. Reuses CardTests instead of duplicating HA lookup behavior.
+
+Why: Validate the delivered template against producer snapshots without accessing an HA server.
+
 ### `ParallelProgressTests.test_each_destination_total_depends_on_its_own_config_and_overall_is_sum(...)`
 
 Check each destination total depends on its own config and overall is sum.
@@ -2561,6 +2575,31 @@ Check observer failure does not change a real upload return value.
 Why: Verify real tracker, operation observers, worker routing or automatic card behavior without production services.
 
 
+### `ParallelProgressTests.test_overall_and_table_show_upload_cleanup_and_trash_running_together(...)`
+
+Hold distinct operation contexts active on three destinations; assert combined categories, independent current-step rows and overall/table/detail order. Confirm active categories clear when the contexts end.
+
+Why: A single global phase cannot describe all simultaneously active destinations.
+
+### `ParallelProgressTests.test_overview_rows_and_totals_follow_added_and_removed_config_destinations(...)`
+
+Initialize plans for one, two, three, four and then two configured destinations, rendering each snapshot and checking exact rows and summed denominators.
+
+Why: Adding/removing destinations must require only config changes and cannot leave stale rows.
+
+### `ParallelProgressTests.test_finished_run_has_no_active_activity_or_stale_upload_label(...)`
+
+Start/finish a transfer observation and settle the run; verify no running activity survives and all planned counts are settled.
+
+Why: Finished progress must never suggest that an upload is still active.
+
+### `ParallelProgressTests.test_overview_accepts_older_details_and_escapes_configured_names(...)`
+
+Render a prior detailed payload without the new activity metadata and a name containing a pipe, HTML and a newline. Check fallback activity/phase and safe single-cell text.
+
+Why: Updated cards must support prior payloads and preserve Markdown table structure for user names.
+
+
 # Detailed parallel observation hooks
 
 The existing operations are called exactly once with their original arguments. observe_step wraps source acquisition, reservation/quota planning, combined delete plans, trash cleanup, upload and verification. Snapshot and configured wait calls use step contexts. The existing per-target planning loop uses one pre/post step context for each rule. The observer records no-op skips, but introduces no rclone invocation or new eligibility decision. Existing global barriers still determine actual concurrency.
@@ -2568,3 +2607,5 @@ The existing operations are called exactly once with their original arguments. o
 The card reads details.remote_jobs under the same manufacturer/role discovery as before. It displays aggregate settled steps plus every destination's counts, all active operation labels, complete table and independent stderr tail. It retains generic item rendering when details are absent. Markdown row whitespace is controlled so step tables remain contiguous. Full details remain in status/retained-result attributes; current_item sensor state may be shortened by HA's existing 255-character template, while attributes/card retain all destinations.
 
 The source safety audit strips only observer additions from ASTs and verifies the original operation bodies/decisions match. Existing fake-rclone tests separately prove command arguments, snapshot counts, file selection, trash behavior and stage barriers remain correct.
+
+The progress module's `ACTIVITY_LABELS` constant maps existing operation kinds to readable overview labels, with trash steps identified by their stable IDs. Card templates loop over `details.remote_jobs` directly; they never cap destination rows with the separate generic result-list display limit.

@@ -90,7 +90,7 @@
 ### {{ icon }} {{ record.name | e }} — {{ outcome | replace('_', ' ') | upper }}{% if dry_run %} · PREVIEW{% endif %}
 
 {% if outcome == 'running' %}
-**Phase:** {{ state_attr(source, 'phase') or 'Preparing' }}
+**Phase:** {{ detail.activity if jobs and detail.activity is defined else (state_attr(source, 'phase') or 'Preparing') | replace('_', ' ') }}
 
 **Current:** {{ state_attr(source, 'current_item') or 'Preparing next item' }}
 {% elif outcome == 'heartbeat_lost' %}
@@ -115,6 +115,10 @@ Previous retained result: {{ states(record.last) | upper }} — it belongs to an
 **Error:** {{ error | e | replace('\n', ' ') }}
 {% endif %}
 
+{% if jobs %}
+**Overall run progress**
+
+{% endif %}
 {% if percentage is not none %}
 {% set percent = [0, [100, percentage] | min] | max %}
 {% set bars = (percent // 10) | int %}
@@ -127,6 +131,14 @@ Previous retained result: {{ states(record.last) | upper }} — it belongs to an
 **Steps:** {{ done if done is not none else '?' }} / {{ total if total is not none else '?' }} settled
 
 **Destinations:** {{ jobs | count }} · **Active destinations:** {{ detail.active_destination_count }} · **Running steps:** {{ detail.running }} · **Failed steps:** {{ detail.failed }} · **Skipped steps:** {{ detail.skipped }}
+
+**Destinations — live overview**
+
+| Destination | Activity / current step | Settled steps | Progress | State |
+|:---|:---|:---:|:---:|:---|
+{% for destination in jobs -%}
+| {{ destination.name | e | replace('|', '&#124;') | replace('\n', ' ') }} | {{ destination.activity | default('Active' if destination.active_steps else 'Finished' if destination.completed == destination.total else 'Waiting for next phase') | e | replace('|', '&#124;') | replace('\n', ' ') }}{% if destination.active_steps %}: {{ destination.active_steps | join('; ') | e | replace('|', '&#124;') | replace('\n', ' ') }}{% endif %} | {{ destination.completed }} / {{ destination.total }} | {{ destination.progress_percent }}% | {{ destination.status | upper }}{% if destination.has_failures | default(false) %} · ⚠ failure recorded{% endif %} |
+{% endfor %}
 
 {% for destination in jobs %}
 #### {{ destination.name | e | replace('\n', ' ') }} — {{ destination.status | upper }}

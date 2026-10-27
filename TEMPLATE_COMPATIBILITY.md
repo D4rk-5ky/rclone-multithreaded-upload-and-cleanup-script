@@ -1,6 +1,6 @@
 # Supplied MQTT template compatibility
 
-Application: rclone-multithreaded-upload 0.0.31.
+Application: rclone-multithreaded-upload 0.0.32.
 Supplied archive: syncerate-mqtt-template.zip.
 Archive SHA-256: `1558fed2b1cd59b2cfd5b31df0996f3d3779259700b2b7e524a14d91a7de1a43`.
 

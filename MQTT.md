@@ -1,6 +1,6 @@
 # Syncerate template reporting for rclone-multithreaded-upload
 
-Version 0.0.31 uses the newly supplied template: completion module 1.1.0 and live-preview module 1.2.0. The completion module is unchanged; the live module has a backward-compatible optional JSON-object `details` extension for parallel progress. Both retain their standard contracts; `mqtt.py` and `reporting.py` adapt rclone results to them.
+Version 0.0.32 uses the newly supplied template: completion module 1.1.0 and live-preview module 1.2.0. The completion module is unchanged; the live module has a backward-compatible optional JSON-object `details` extension for parallel progress. Both retain their standard contracts; `mqtt.py` and `reporting.py` adapt rclone results to them.
 
 ## Configure the channels independently
 
@@ -57,7 +57,7 @@ Every completion payload has these template fields:
 | `warning` | Boolean; true if any remote's overall result was skipped. Warnings do not rewrite the result code. |
 | `schema_version` | Integer 1. |
 | `comment` | Optional root `comment` string, default empty. |
-| `version` | Application version, currently `"0.0.31"`. |
+| `version` | Application version, currently `"0.0.32"`. |
 | `timestamp`, `host`, `run_id` | UTC report timestamp, local hostname, unique run identifier. Both enabled channels share the run ID. |
 
 Rclone extensions remain available: `event`, `script_name`, `application`, `application_version`, `failed_remotes`, and `remotes`. Each remote retains its name, path, status, four stage statuses, and structured stage errors. It also has a `progress` object with its own planned steps/counts/current operations; a top-level `progress` object contains the overall totals. These are non-conflicting application extensions. Generic completion events omit Syncerate dataset sections; rclone diagnostics use `remotes`. See `payload-examples.json` for full success and failure examples.

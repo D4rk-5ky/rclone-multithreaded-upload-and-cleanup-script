@@ -13,6 +13,9 @@ from .state import STATE
 STAGES = ("reservation", "upload", "post_cleanup", "final_quota")
 TERMINAL = {"SUCCESS", "FAILED", "SKIPPED", "INTERRUPTED"}
 CURRENT_REMOTE = ContextVar("rclone_progress_remote", default=None)
+ACTIVITY_LABELS = {"upload": "Upload", "cleanup": "Cleanup", "trash": "Trash cleanup",
+                   "snapshot": "Snapshot", "planning": "Quota planning",
+                   "wait": "Waiting", "verification": "Verification"}
 
 
 def rule_step_id(prefix: str, path: str) -> str:
@@ -155,6 +158,7 @@ def remote_progress(result, source: str = "") -> dict:
     """Build a detached destination snapshot; caller holds the run-results lock."""
     from .reporting import sanitize
     tasks = [{"id": key, "label": task.label, "stage": task.stage, "kind": task.kind,
+              "activity": ACTIVITY_LABELS.get("trash" if key in {"pre_trash", "post_trash"} else task.kind, task.kind),
               "status": task.status, "error": sanitize(task.error),
               "started_at": task.started_at, "finished_at": task.finished_at}
              for key, task in result.steps.items()]
@@ -171,6 +175,8 @@ def remote_progress(result, source: str = "") -> dict:
                     for path, phases in rules.items()]
     done = sum(row["status"] in TERMINAL for row in tasks)
     running = [row for row in tasks if row["status"] == "RUNNING"]
+    activity_counts = {label: sum(row["activity"] == label for row in running)
+                       for label in ACTIVITY_LABELS.values() if any(row["activity"] == label for row in running)}
     failed = sum(row["status"] in {"FAILED", "INTERRUPTED"} for row in tasks)
     statuses = [getattr(result, stage).status for stage in STAGES]
     status = ("running" if running else "waiting" if done < len(tasks) and done else
@@ -182,7 +188,10 @@ def remote_progress(result, source: str = "") -> dict:
             "running": len(running), "succeeded": sum(row["status"] == "SUCCESS" for row in tasks),
             "failed": failed, "skipped": sum(row["status"] == "SKIPPED" for row in tasks),
             "pending": sum(row["status"] == "PENDING" for row in tasks),
-            "active_steps": [row["label"] for row in running], "steps": tasks, "cleanup_jobs": cleanup_jobs,
+            "active_steps": [row["label"] for row in running],
+            "activity_counts": activity_counts,
+            "activity": "; ".join(activity_counts) or ("Waiting for next phase" if done < len(tasks) else "Finished"),
+            "steps": tasks, "cleanup_jobs": cleanup_jobs,
             "stages": {stage: getattr(result, stage).status for stage in STAGES},
             "stderr": sanitize(result.stderr_tail),
             "error": sanitize("\n".join(error for stage in STAGES for error in getattr(result, stage).errors)),
@@ -193,7 +202,14 @@ def progress_snapshot_locked() -> dict:
     """Sum all destination denominators/counters from one locked observation snapshot."""
     sources = {upload.remote_path: upload.local_path for upload in STATE.upload_directories}
     rows = [remote_progress(result, sources.get(remote, "")) for remote, result in STATE.run_results.items()]
+    activity_counts = {label: sum(row["activity_counts"].get(label, 0) for row in rows)
+                       for label in ACTIVITY_LABELS.values()
+                       if any(label in row["activity_counts"] for row in rows)}
+    unfinished = any(row["completed"] < row["total"] for row in rows)
     return {"schema_version": 1, "unit": "steps", "destination_count": len(rows),
+            "activity_counts": activity_counts,
+            "activity": "; ".join(f"{label}: {count}" for label, count in activity_counts.items())
+                        or ("Waiting for next phase" if unfinished else "Finished" if rows else "Preparing"),
             "active_destination_count": sum(row["running"] > 0 for row in rows),
             "completed": sum(row["completed"] for row in rows), "total": sum(row["total"] for row in rows),
             "running": sum(row["running"] for row in rows), "failed": sum(row["failed"] for row in rows),

@@ -1,5 +1,6 @@
 """Real operation observers, concurrent destination snapshots and HA card rendering."""
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import ExitStack
 import json
 from pathlib import Path
 import subprocess
@@ -34,11 +35,11 @@ class ParallelProgressTests(unittest.TestCase):
         STATE.run_error = STATE.stderr_tail = ''
         STATE.script_name = 'Parallel Frigate run'
         STATE.upload_directories = [
-            UploadDirectory(self.folder.name, 'remote:a', [], [], name='Archive A', empty_trash=False),
+            UploadDirectory(self.folder.name, 'remote:a', [], [], name='OneDrive', empty_trash=False),
             UploadDirectory(self.folder.name, 'remote:b', [], [DirectoryCleanupRule('/', max_size='2M')],
-                            name='Archive B', max_total_size='2M', empty_trash=False),
+                            name='GDrive', max_total_size='2M', empty_trash=False),
             UploadDirectory(self.folder.name, 'remote:c', [], [DirectoryCleanupRule('/', max_size='2M'),
-                            DirectoryCleanupRule('Camera', max_files=10)], name='Archive C', max_total_size='2M'),
+                            DirectoryCleanupRule('Camera', max_files=10)], name='Mega', max_total_size='2M'),
         ]
         initialize_run_results()
         STATE.live_preview = LivePreview(LiveConfig(manufacturer=APPLICATION_NAME), name=STATE.script_name, job=APPLICATION_NAME)
@@ -49,6 +50,15 @@ class ParallelProgressTests(unittest.TestCase):
         STATE.live_preview.close()
         self.folder.cleanup()
         self.saved.__exit__(None, None, None)
+
+    def _render_snapshot(self, snapshot):
+        from test_manufacturer_card import CardTests, NativeEnvironment
+        if NativeEnvironment is None:
+            self.skipTest('Card rendering needs requirements-test.txt')
+        card = CardTests()
+        card.setUp()
+        card.add('parallel_frigate', name=STATE.script_name, live=snapshot, renamed=True)
+        return card.render()
 
     def test_each_destination_total_depends_on_its_own_config_and_overall_is_sum(self):
         snapshot = STATE.live_preview.snapshot()
@@ -97,6 +107,7 @@ class ParallelProgressTests(unittest.TestCase):
                 detail = snapshot['details']
                 self.assertEqual(detail['active_destination_count'], 3)
                 self.assertEqual(detail['running'], 3)
+                self.assertEqual(detail['activity_counts'], {'Trash cleanup' if cleanup else 'Upload': 3})
                 self.assertEqual(snapshot['total'], sum(row['total'] for row in detail['remote_jobs']))
                 for row in detail['remote_jobs']:
                     self.assertEqual(row['status'], 'running')
@@ -111,19 +122,14 @@ class ParallelProgressTests(unittest.TestCase):
                     self.assertIsNotNone(active['started_at'])
                     self.assertIsNone(active['finished_at'])
                 if render:
-                    from test_manufacturer_card import CardTests, NativeEnvironment
-                    if NativeEnvironment is None:
-                        self.skipTest('Card rendering needs requirements-test.txt')
-                    card = CardTests()
-                    card.setUp()
-                    card.add('parallel_frigate', name=STATE.script_name, live=snapshot, renamed=True)
-                    text = card.render()
+                    text = self._render_snapshot(snapshot)
                     self.assertIn('**Destinations:** 3', text)
                     self.assertIn('**Active destinations:** 3', text)
                     self.assertIn('**Steps:** 0 / 35 settled', text)
-                    for name, count in [('Archive A', 7), ('Archive B', 12), ('Archive C', 16)]:
+                    for name, count in [('OneDrive', 7), ('GDrive', 12), ('Mega', 16)]:
                         self.assertIn('#### ' + name + ' — RUNNING', text)
                         self.assertIn(f'**Progress:** 0 / {count} steps settled', text)
+                        self.assertIn(f'| {name} | Upload: Upload files (copy) | 0 / {count} | 0.0% | RUNNING |', text)
                     self.assertEqual(text.count('| 🟢 RUNNING |'), 3)
                     self.assertIn('| Step | Phase | State | Detail |\n|:---|:---|:---|:---|\n| Pre-upload remote snapshot', text)
                 release[uploads[0].remote_path].set()
@@ -167,6 +173,66 @@ class ParallelProgressTests(unittest.TestCase):
 
     def test_manufacturer_card_shows_every_parallel_destination_and_its_steps(self):
         self._hold_three_operations(render=True)
+
+    def test_overall_and_table_show_upload_cleanup_and_trash_running_together(self):
+        with ExitStack() as active:
+            for remote, key in [('remote:a', 'upload'), ('remote:b', 'pre_delete'), ('remote:c', 'pre_trash')]:
+                active.enter_context(step(remote, key))
+            snapshot = STATE.live_preview.snapshot()
+            self.assertEqual(snapshot['details']['activity_counts'], {'Upload': 1, 'Cleanup': 1, 'Trash cleanup': 1})
+            text = self._render_snapshot(snapshot)
+            self.assertIn('**Phase:** Upload: 1; Cleanup: 1; Trash cleanup: 1', text)
+            self.assertIn('| OneDrive | Upload: Upload files (copy) | 0 / 7', text)
+            self.assertIn('| GDrive | Cleanup: Execute pre-upload delete plan | 0 / 12', text)
+            self.assertIn('| Mega | Trash cleanup: Pre-upload trash cleanup | 0 / 16', text)
+            self.assertLess(text.index('**Overall run progress**'), text.index('| Destination |'))
+            self.assertLess(text.index('| Destination |'), text.index('#### OneDrive'))
+        snapshot = STATE.live_preview.snapshot()
+        self.assertEqual(snapshot['completed'], 3)
+        self.assertEqual(snapshot['details']['activity_counts'], {})
+        self.assertEqual(snapshot['details']['activity'], 'Waiting for next phase')
+
+    def test_overview_rows_and_totals_follow_added_and_removed_config_destinations(self):
+        uploads = list(STATE.upload_directories)
+        uploads.append(UploadDirectory(self.folder.name, 'remote:d', [], [], name='Nextcloud', empty_trash=False))
+        for count in [1, 2, 3, 4, 2]:
+            with self.subTest(destinations=count):
+                STATE.upload_directories = uploads[:count]
+                initialize_run_results()
+                refresh_live()
+                snapshot = STATE.live_preview.snapshot()
+                rows = snapshot['details']['remote_jobs']
+                text = self._render_snapshot(snapshot)
+                self.assertEqual(snapshot['details']['destination_count'], count)
+                self.assertEqual(snapshot['total'], sum([7, 12, 16, 7][:count]))
+                self.assertEqual(text.count(' | Waiting for next phase | '), count)
+                for row in rows:
+                    self.assertIn(f'| {row["name"]} | Waiting for next phase | 0 / {row["total"]} | 0.0% | PENDING |', text)
+                for upload in uploads[count:]:
+                    self.assertNotIn('| ' + upload.name + ' |', text)
+
+    def test_finished_run_has_no_active_activity_or_stale_upload_label(self):
+        with step('remote:a', 'upload'):
+            self.assertEqual(STATE.live_preview.snapshot()['details']['activity'], 'Upload: 1')
+        finish_steps(0)
+        snapshot = STATE.live_preview.snapshot()
+        self.assertEqual(snapshot['details']['activity'], 'Finished')
+        self.assertEqual(snapshot['details']['activity_counts'], {})
+        self.assertEqual(snapshot['completed'], snapshot['total'])
+        self.assertTrue(all(row['activity'] == 'Finished' for row in snapshot['details']['remote_jobs']))
+
+    def test_overview_accepts_older_details_and_escapes_configured_names(self):
+        with step('remote:a', 'upload'):
+            snapshot = STATE.live_preview.snapshot()
+        snapshot['details'].pop('activity')
+        snapshot['details'].pop('activity_counts')
+        snapshot['details']['remote_jobs'][0]['name'] = 'OneDrive | <backup>\nPrimary'
+        for row in snapshot['details']['remote_jobs']:
+            row.pop('activity')
+            row.pop('activity_counts')
+        text = self._render_snapshot(snapshot)
+        self.assertIn('| OneDrive &#124; &lt;backup&gt; Primary | Active: Upload files (copy) | 0 / 7', text)
+        self.assertIn('| Mega | Waiting for next phase | 0 / 16', text)
 
     def test_failed_preparation_skips_its_dependents_but_leaves_post_cleanup_available(self):
         remote = 'remote:b'

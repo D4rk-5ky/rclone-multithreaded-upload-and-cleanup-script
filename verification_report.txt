@@ -1,39 +1,34 @@
-Verification report — rclone-multithreaded-upload 0.0.31
+Verification report — rclone-multithreaded-upload 0.0.32
 Date: 2026-10-27 (Europe/Copenhagen)
 
 Inputs and workflow
 - Original supplied project: rclone-multithreaded-upload-and-cleanup-script-main.zip, application 0.0.26.
-- Previous release: rclone-multithreaded-upload-and-cleanup-script-0.0.30.zip, application 0.0.30.
-- Inspected source/module/phase structure, config, documents and test inventory
-  before implementation. Original and previous-release files are preserved.
-- Version increment is exactly 0.0.1; rollover policy remains 0.0.99 -> 0.1.0.
+- Previous release: rclone-multithreaded-upload-and-cleanup-script-0.0.31.zip, application 0.0.31.
+- Inspected project source/config/docs/tests and phase/safety behavior before editing.
+- Version increments exactly 0.0.1; rollover remains 0.0.99 -> 0.1.0.
+- No original or previous-release files removed.
 
-Changes
-- Added per-destination fixed detailed plans derived from actual effective cleanup
-  targets, quota, trash and wait settings; original summary stages remain intact.
-- Added nonfatal observer-only contexts/decorators around actual snapshots, each
-  cleanup rule, reservation/quota planning, combined deletes, trash operations,
-  configured wait, upload and final verification. No-op/blocked work is skipped
-  with a reason. Original command/eligibility/barrier decisions are retained.
-- Added independent per-destination step tables/counters/current operations and
-  diagnostic tails, and per-cleanup-path pre/post planning counts. Whole-run
-  completed/total are sums of destination observations. Derived cleanup views do
-  not double count their steps. Example denominators 7, 12 and 16 sum to 35.
-- Extended the live template only with optional detached JSON-object details,
-  merged atomically with standard counters. Manufacturer/role lookup, identities,
-  topics, coalescing, retention and transport timeouts remain intact.
-- Completion template/HA automation are unchanged. The adapter adds non-conflicting
-  overall/per-remote progress extensions while preserving standard outcome fields.
-- Updated the manufacturer Markdown/YAML card to show every destination and its
-  cleanup paths/step table. Kept generic-job fallback. Included a custom card preset
-  to the exact user manufacturer, without copying any broker credentials.
-- Updated current docs, complete function/command map, version history and examples.
-  Added PARALLEL_PROGRESS.md and synthetic JSON/rendered three-destination examples.
-  Config settings/options and owner's exact disclaimer are preserved.
+Changes in this release
+- Added readable activity/count metadata derived from RUNNING observations in the
+  existing locked snapshot, independently per destination and summed for the run.
+- Upload, Cleanup and Trash cleanup are distinct, with Snapshot, Quota planning,
+  Waiting and Verification also identified. Idle/finished states clear active counts.
+- Added compact dynamic destination overview table beneath overall run progress:
+  configured name, activity/current step, independent settled/total, percentage,
+  state and existing-failure marker. Existing full details remain beneath the table.
+- Table rows follow configured destinations without a fixed count or hardcoded names.
+  New top phase text summarizes all currently active categories across destinations.
+- Preserved manufacturer/role discovery, renamed-entity support and old-payload
+  fallback. Default and custom ASUS manufacturer cards share the same template.
+- Updated current usage/docs/code map/history. Synthetic examples now use OneDrive,
+  GDrive and Mega with different denominators (7, 12, 16; sum 35) and running uploads
+  at 14/35 overall. A separate example shows upload/cleanup/trash categories together.
+- No new config options; both complete config examples and the exact owner disclaimer
+  remain intact. Completion/live remain independently configured.
 
 Compile, CLI, schema, card and safety checks
 All Python source/tests compile and parse as Python 3.10 syntax.
-Code map covers all 361 explicit functions/methods, including nested helpers.
+Code map covers all 366 explicit functions/methods, including nested helpers.
 config.example.json: all canonical fields present; actual validation exits 0 and prints overall/per-destination step totals.
 rclone-cctv-config.example.json: all canonical fields present; actual validation exits 0 and prints overall/per-destination step totals.
 CLI --help: expected exit 0.
@@ -46,62 +41,56 @@ Live template changes are exactly the additive details field/validation/docs; co
 Owner disclaimer preserved verbatim.
 Observer-stripped original operation ASTs match for phases.py, planning.py, reservation.py, upload.py, cleanup.py, delete_plan.py, verification.py.
 Configuration, command runner, locks, backend/file listing, state, targets, utilities and completion template remain byte-identical.
+All application Python modules except version and progress metadata are byte-identical to 0.0.31; HA completion automation is also byte-identical.
 
 Offline tests
 Environment: Python 3.14.4 (main, Aug 20 2026, 10:41:58) [GCC 15.2.0] on Linux.
 Command from project root:
   PYTHONDONTWRITEBYTECODE=1 python3 -B -m unittest discover -s tests -v
-Result: 141 tests passed in 15.612 seconds (OK); no skipped tests.
+Result: 145 tests passed in 18.303 seconds (OK), no skipped tests.
 
-The existing suite verifies whole-file quota selection, exact source snapshots,
-combined deletes, trash/hard-delete distinctions, final limits, failure isolation,
-CLI help/validation, typed completion JSON, deadline-bounded real worker subprocesses
-with fake Paho, manufacturer discovery, HA notification formatting and card rendering.
+Four added tests cover mixed active categories and overview order; reinitialization
+for one, two, three, four and back to two destinations with exact table rows and
+summed denominators; clearing stale active labels at finish; older payloads and
+escaping configured names containing a pipe, HTML and newline. Existing three-worker
+upload/trash tests now use OneDrive/GDrive/Mega labels and check the new activity
+counts and compact overview as actual observed operations are held open.
 
-Thirteen new tests hold three actual observed upload functions open, then three
-trash-cleanup functions, using fake subprocess boundaries. They verify that all
-three destinations appear concurrently, completion of one does not advance another,
-diagnostics remain correctly owned, the actual manufacturer card renders all rows,
-destination totals differ with settings, cleanup paths have independent two-phase
-counts, nested views do not inflate totals, and concurrent snapshots stay consistent
-and monotonic. Other tests verify shared-cache acquisition visibility without extra
-source scans, failure/skip/interrupt states, no ghost workers, no transfer for an empty
-selection, immutable failed observations and nonfatal monitor failures.
-
-Existing full-entrypoint/fake-rclone tests exercise success and partial failure with
-real MQTT worker subprocesses/fake Paho. Their final detailed live/completion totals
-are 24/24 for two 12-step destinations; legacy 8/8 stages remain available. They check
-no unreached steps in those real flows, complete per-remote observations, post-cleanup
-after partial upload failure and the original three remote snapshots/barriers.
+The full suite also covers worker concurrency, failure isolation, interruption,
+monotonic counts, independent stderr, per-cleanup-rule views without double counting,
+shared source-cache acquisition, no-op steps, monitor failures, actual entrypoint
+success and partial failure using fake rclone and real publisher worker subprocesses
+with fake Paho, stage barriers, source selection/quotas/delete modes/locks, typed
+success/failure JSON, bounded notifications and manufacturer card discovery.
 
 Safety evidence
-The original operation ASTs match after stripping only observer decorators/contexts,
-no-op annotations and the obsolete single-current-item update. This covers phases,
-planning, reservation, upload, cleanup, delete planning/execution and verification.
-Protected configuration, subprocess runner, lock, backend/file listing, state,
-target, utilities and completion-template modules remain byte-identical to the
-previous release. Tests additionally verify the original actual command behavior.
+All Python application files except __init__.py (version) and progress.py (derived
+activity metadata) are byte-identical to 0.0.31. Thus operation functions, rclone
+commands, stage barriers, eligibility checks, locking, config parsing, report adapter,
+live/completion modules, background publisher and final-outcome logic are unchanged.
+HA completion automation is also byte-identical. The earlier observer-stripped AST
+comparison against 0.0.30 still passes for all seven instrumented operation modules.
 
 Package verification
 - Original paths retained: 36/36, zero missing.
-- Previous-release paths retained: 55/55, zero missing.
-- Intended packaged files: 61; ZIP membership matches the release directory
-  and RELEASE_MANIFEST.json exactly. Every archived byte matches the saved file.
-- ZIP CRC, per-file SHA256SUMS, executable entry mode and sibling archive SHA256
-  verified. No bytecode, build caches, test logs or temporary work files included.
-- The standalone custom-card output matches the card inside the full ZIP.
+- Previous-release paths retained: 61/61, zero missing.
+- Intended file count: 61. ZIP membership matches saved release files and
+  RELEASE_MANIFEST.json; every archived byte matches its source file.
+- Verified ZIP CRC, SHA256SUMS (all files except itself), sibling archive SHA256 and
+  executable entry mode. No bytecode, build caches, temporary files or logs included.
+- Standalone custom-card output matches the included ASUS manufacturer card.
 
-Limits
-- No real MQTT broker, HA installation, Pushover action, TLS endpoint, cloud provider,
-  production upload, move or deletion was exercised. Real operation functions were
-  tested with offline subprocess boundaries and fake rclone/Paho, not production data.
-- Python 3.10 syntax was checked; runtime tests used Python 3.14.4 only. No frozen
-  executable or cross-platform deployment was built/tested.
-- Counts are settled logical workflow steps, including failures/skips/interrupts,
-  not byte percentages or time estimates. A long upload is one running step.
-- Actual transfer bytes/speed remain Unknown. Fast updates may be coalesced, but
-  recorded step states/timestamps remain in the full details table.
-- Existing thread limits and global barriers still determine concurrency. The
-  monitor observes all workers; it does not schedule work or overlap forbidden phases.
-- Upgrade both application and card for detailed progress. Existing manufacturer
-  matching remains exact; custom card selector must match live.manufacturer.
+Limits and usage
+- No real MQTT broker, HA instance, Pushover, TLS endpoint, cloud provider or real
+  upload/move/deletion was exercised. Integration uses offline fakes and fixture data.
+- Python 3.10 syntax checked; runtime tests used Python 3.14.4 on Linux.
+- Counts measure settled logical workflow steps (including failures/skips), not
+  transferred bytes or elapsed-time estimates. A long upload remains one active step.
+  Final 100% does not mean success; explicit outcomes/errors remain authoritative.
+- MQTT can coalesce fast changes; full step states/timestamps remain in details.
+  Existing scheduling limits/barriers still determine which work may overlap.
+- Install the new application and update the HA Markdown card. Set each config
+  upload_directories entry's name for destination labels. Add/remove entries there
+  to change rows; the card requires no entity IDs or fixed destination list.
+- The ASUS card matches exactly the custom live.manufacturer previously supplied:
+  rclone-multithreaded-upload-ubuntu-zfs-raid-import-test. No credentials copied.

@@ -13,19 +13,19 @@
     "schema_version": 1,
     "command": "rclone-multithreaded-upload",
     "comment": "",
-    "version": "0.0.31",
-    "timestamp": "2026-10-27T12:27:36.090508+00:00",
+    "version": "0.0.32",
+    "timestamp": "2026-10-27T13:02:46.278053+00:00",
     "host": "darkyere-VirtualBox",
     "run_id": "parallel-example-success",
     "event": "rclone_multithreaded_upload_result",
     "script_name": "Frigate CCTV Upload",
     "application": "rclone-multithreaded-upload",
-    "application_version": "0.0.31",
+    "application_version": "0.0.32",
     "failed_remotes": [],
     "remotes": [
       {
-        "name": "Archive A",
-        "remote_path": "cloud:a",
+        "name": "OneDrive",
+        "remote_path": "onedrive:Frigate",
         "status": "success",
         "stages": {
           "reservation": "SUCCESS",
@@ -35,9 +35,9 @@
         },
         "errors": [],
         "progress": {
-          "name": "Archive A",
+          "name": "OneDrive",
           "source": "/srv/frigate",
-          "destination": "cloud:a",
+          "destination": "onedrive:Frigate",
           "status": "success",
           "completed": 7,
           "total": 7,
@@ -48,76 +48,85 @@
           "skipped": 2,
           "pending": 0,
           "active_steps": [],
+          "activity_counts": {},
+          "activity": "Finished",
           "steps": [
             {
               "id": "pre_snapshot",
               "label": "Pre-upload remote snapshot",
               "stage": "reservation",
               "kind": "snapshot",
+              "activity": "Snapshot",
               "status": "SUCCESS",
               "error": "",
-              "started_at": "2026-10-27T12:27:36.051688+00:00",
-              "finished_at": "2026-10-27T12:27:36.052336+00:00"
+              "started_at": "2026-10-27T13:02:46.233332+00:00",
+              "finished_at": "2026-10-27T13:02:46.233817+00:00"
             },
             {
               "id": "pre_delete",
               "label": "Execute pre-upload delete plan",
               "stage": "reservation",
               "kind": "cleanup",
+              "activity": "Cleanup",
               "status": "SKIPPED",
               "error": "No cleanup command required in this synthetic example",
-              "started_at": "2026-10-27T12:27:36.053037+00:00",
-              "finished_at": "2026-10-27T12:27:36.053816+00:00"
+              "started_at": "2026-10-27T13:02:46.234218+00:00",
+              "finished_at": "2026-10-27T13:02:46.234729+00:00"
             },
             {
               "id": "upload",
               "label": "Upload files (copy)",
               "stage": "upload",
               "kind": "upload",
+              "activity": "Upload",
               "status": "SUCCESS",
               "error": "",
-              "started_at": "2026-10-27T12:27:36.054264+00:00",
-              "finished_at": "2026-10-27T12:27:36.054987+00:00"
+              "started_at": "2026-10-27T13:02:46.235463+00:00",
+              "finished_at": "2026-10-27T13:02:46.236259+00:00"
             },
             {
               "id": "post_snapshot",
               "label": "Post-upload remote snapshot",
               "stage": "post_cleanup",
               "kind": "snapshot",
+              "activity": "Snapshot",
               "status": "SUCCESS",
               "error": "",
-              "started_at": "2026-10-27T12:27:36.055664+00:00",
-              "finished_at": "2026-10-27T12:27:36.056257+00:00"
+              "started_at": "2026-10-27T13:02:46.236943+00:00",
+              "finished_at": "2026-10-27T13:02:46.237570+00:00"
             },
             {
               "id": "post_delete",
               "label": "Execute post-upload delete plan",
               "stage": "post_cleanup",
               "kind": "cleanup",
+              "activity": "Cleanup",
               "status": "SKIPPED",
               "error": "No cleanup command required in this synthetic example",
-              "started_at": "2026-10-27T12:27:36.056885+00:00",
-              "finished_at": "2026-10-27T12:27:36.057488+00:00"
+              "started_at": "2026-10-27T13:02:46.238164+00:00",
+              "finished_at": "2026-10-27T13:02:46.238759+00:00"
             },
             {
               "id": "final_snapshot",
               "label": "Final remote snapshot",
               "stage": "final_quota",
               "kind": "snapshot",
+              "activity": "Snapshot",
               "status": "SUCCESS",
               "error": "",
-              "started_at": "2026-10-27T12:27:36.058115+00:00",
-              "finished_at": "2026-10-27T12:27:36.058726+00:00"
+              "started_at": "2026-10-27T13:02:46.239347+00:00",
+              "finished_at": "2026-10-27T13:02:46.239949+00:00"
             },
             {
               "id": "verification",
               "label": "Verify all cleanup and remote limits",
               "stage": "final_quota",
               "kind": "verification",
+              "activity": "Verification",
               "status": "SUCCESS",
               "error": "",
-              "started_at": "2026-10-27T12:27:36.059205+00:00",
-              "finished_at": "2026-10-27T12:27:36.059710+00:00"
+              "started_at": "2026-10-27T13:02:46.240362+00:00",
+              "finished_at": "2026-10-27T13:02:46.240766+00:00"
             }
           ],
           "cleanup_jobs": [],
@@ -133,8 +142,8 @@
         }
       },
       {
-        "name": "Archive B",
-        "remote_path": "cloud:b",
+        "name": "GDrive",
+        "remote_path": "gdrive:Frigate",
         "status": "success",
         "stages": {
           "reservation": "SUCCESS",
@@ -144,9 +153,9 @@
         },
         "errors": [],
         "progress": {
-          "name": "Archive B",
+          "name": "GDrive",
           "source": "/srv/frigate",
-          "destination": "cloud:b",
+          "destination": "gdrive:Frigate",
           "status": "success",
           "completed": 12,
           "total": 12,
@@ -157,131 +166,145 @@
           "skipped": 2,
           "pending": 0,
           "active_steps": [],
+          "activity_counts": {},
+          "activity": "Finished",
           "steps": [
             {
               "id": "pre_snapshot",
               "label": "Pre-upload remote snapshot",
               "stage": "reservation",
               "kind": "snapshot",
+              "activity": "Snapshot",
               "status": "SUCCESS",
               "error": "",
-              "started_at": "2026-10-27T12:27:36.062176+00:00",
-              "finished_at": "2026-10-27T12:27:36.062681+00:00"
+              "started_at": "2026-10-27T13:02:46.242577+00:00",
+              "finished_at": "2026-10-27T13:02:46.242942+00:00"
             },
             {
               "id": "local_snapshot",
               "label": "Acquire filtered local file snapshot",
               "stage": "reservation",
               "kind": "snapshot",
+              "activity": "Snapshot",
               "status": "SUCCESS",
               "error": "",
-              "started_at": "2026-10-27T12:27:36.063162+00:00",
-              "finished_at": "2026-10-27T12:27:36.063664+00:00"
+              "started_at": "2026-10-27T13:02:46.243314+00:00",
+              "finished_at": "2026-10-27T13:02:46.243695+00:00"
             },
             {
-              "id": "pre_rule:cloud:b/",
-              "label": "Plan pre-upload cleanup: cloud:b/",
+              "id": "pre_rule:gdrive:Frigate/",
+              "label": "Plan pre-upload cleanup: gdrive:Frigate/",
               "stage": "reservation",
               "kind": "cleanup",
+              "activity": "Cleanup",
               "status": "SUCCESS",
               "error": "",
-              "started_at": "2026-10-27T12:27:36.064246+00:00",
-              "finished_at": "2026-10-27T12:27:36.064872+00:00"
+              "started_at": "2026-10-27T13:02:46.244080+00:00",
+              "finished_at": "2026-10-27T13:02:46.244466+00:00"
             },
             {
               "id": "reservation",
               "label": "Reserve space for selected upload files",
               "stage": "reservation",
               "kind": "planning",
+              "activity": "Quota planning",
               "status": "SUCCESS",
               "error": "",
-              "started_at": "2026-10-27T12:27:36.065487+00:00",
-              "finished_at": "2026-10-27T12:27:36.066133+00:00"
+              "started_at": "2026-10-27T13:02:46.244899+00:00",
+              "finished_at": "2026-10-27T13:02:46.245322+00:00"
             },
             {
               "id": "pre_delete",
               "label": "Execute pre-upload delete plan",
               "stage": "reservation",
               "kind": "cleanup",
+              "activity": "Cleanup",
               "status": "SKIPPED",
               "error": "No cleanup command required in this synthetic example",
-              "started_at": "2026-10-27T12:27:36.066933+00:00",
-              "finished_at": "2026-10-27T12:27:36.067423+00:00"
+              "started_at": "2026-10-27T13:02:46.245806+00:00",
+              "finished_at": "2026-10-27T13:02:46.246206+00:00"
             },
             {
               "id": "upload",
               "label": "Upload files (copy)",
               "stage": "upload",
               "kind": "upload",
+              "activity": "Upload",
               "status": "SUCCESS",
               "error": "",
-              "started_at": "2026-10-27T12:27:36.067891+00:00",
-              "finished_at": "2026-10-27T12:27:36.068216+00:00"
+              "started_at": "2026-10-27T13:02:46.246609+00:00",
+              "finished_at": "2026-10-27T13:02:46.247004+00:00"
             },
             {
               "id": "post_snapshot",
               "label": "Post-upload remote snapshot",
               "stage": "post_cleanup",
               "kind": "snapshot",
+              "activity": "Snapshot",
               "status": "SUCCESS",
               "error": "",
-              "started_at": "2026-10-27T12:27:36.068595+00:00",
-              "finished_at": "2026-10-27T12:27:36.068944+00:00"
+              "started_at": "2026-10-27T13:02:46.247373+00:00",
+              "finished_at": "2026-10-27T13:02:46.247885+00:00"
             },
             {
-              "id": "post_rule:cloud:b/",
-              "label": "Plan post-upload cleanup: cloud:b/",
+              "id": "post_rule:gdrive:Frigate/",
+              "label": "Plan post-upload cleanup: gdrive:Frigate/",
               "stage": "post_cleanup",
               "kind": "cleanup",
+              "activity": "Cleanup",
               "status": "SUCCESS",
               "error": "",
-              "started_at": "2026-10-27T12:27:36.069310+00:00",
-              "finished_at": "2026-10-27T12:27:36.069709+00:00"
+              "started_at": "2026-10-27T13:02:46.248310+00:00",
+              "finished_at": "2026-10-27T13:02:46.248750+00:00"
             },
             {
               "id": "post_quota",
               "label": "Plan post-upload total-size cleanup",
               "stage": "post_cleanup",
               "kind": "planning",
+              "activity": "Quota planning",
               "status": "SUCCESS",
               "error": "",
-              "started_at": "2026-10-27T12:27:36.070086+00:00",
-              "finished_at": "2026-10-27T12:27:36.070690+00:00"
+              "started_at": "2026-10-27T13:02:46.249166+00:00",
+              "finished_at": "2026-10-27T13:02:46.249631+00:00"
             },
             {
               "id": "post_delete",
               "label": "Execute post-upload delete plan",
               "stage": "post_cleanup",
               "kind": "cleanup",
+              "activity": "Cleanup",
               "status": "SKIPPED",
               "error": "No cleanup command required in this synthetic example",
-              "started_at": "2026-10-27T12:27:36.071129+00:00",
-              "finished_at": "2026-10-27T12:27:36.071465+00:00"
+              "started_at": "2026-10-27T13:02:46.250109+00:00",
+              "finished_at": "2026-10-27T13:02:46.250554+00:00"
             },
             {
               "id": "final_snapshot",
               "label": "Final remote snapshot",
               "stage": "final_quota",
               "kind": "snapshot",
+              "activity": "Snapshot",
               "status": "SUCCESS",
               "error": "",
-              "started_at": "2026-10-27T12:27:36.071937+00:00",
-              "finished_at": "2026-10-27T12:27:36.072263+00:00"
+              "started_at": "2026-10-27T13:02:46.250944+00:00",
+              "finished_at": "2026-10-27T13:02:46.251354+00:00"
             },
             {
               "id": "verification",
               "label": "Verify all cleanup and remote limits",
               "stage": "final_quota",
               "kind": "verification",
+              "activity": "Verification",
               "status": "SUCCESS",
               "error": "",
-              "started_at": "2026-10-27T12:27:36.072676+00:00",
-              "finished_at": "2026-10-27T12:27:36.073014+00:00"
+              "started_at": "2026-10-27T13:02:46.251774+00:00",
+              "finished_at": "2026-10-27T13:02:46.252166+00:00"
             }
           ],
           "cleanup_jobs": [
             {
-              "path": "cloud:b/",
+              "path": "gdrive:Frigate/",
               "completed": 2,
               "total": 2,
               "running": 0,
@@ -303,8 +326,8 @@
         }
       },
       {
-        "name": "Archive C",
-        "remote_path": "cloud:c",
+        "name": "Mega",
+        "remote_path": "mega:Frigate",
         "status": "success",
         "stages": {
           "reservation": "SUCCESS",
@@ -314,9 +337,9 @@
         },
         "errors": [],
         "progress": {
-          "name": "Archive C",
+          "name": "Mega",
           "source": "/srv/frigate",
-          "destination": "cloud:c",
+          "destination": "mega:Frigate",
           "status": "success",
           "completed": 16,
           "total": 16,
@@ -327,171 +350,189 @@
           "skipped": 4,
           "pending": 0,
           "active_steps": [],
+          "activity_counts": {},
+          "activity": "Finished",
           "steps": [
             {
               "id": "pre_snapshot",
               "label": "Pre-upload remote snapshot",
               "stage": "reservation",
               "kind": "snapshot",
+              "activity": "Snapshot",
               "status": "SUCCESS",
               "error": "",
-              "started_at": "2026-10-27T12:27:36.075314+00:00",
-              "finished_at": "2026-10-27T12:27:36.075746+00:00"
+              "started_at": "2026-10-27T13:02:46.254859+00:00",
+              "finished_at": "2026-10-27T13:02:46.255332+00:00"
             },
             {
               "id": "local_snapshot",
               "label": "Acquire filtered local file snapshot",
               "stage": "reservation",
               "kind": "snapshot",
+              "activity": "Snapshot",
               "status": "SUCCESS",
               "error": "",
-              "started_at": "2026-10-27T12:27:36.076083+00:00",
-              "finished_at": "2026-10-27T12:27:36.076408+00:00"
+              "started_at": "2026-10-27T13:02:46.255839+00:00",
+              "finished_at": "2026-10-27T13:02:46.256310+00:00"
             },
             {
-              "id": "pre_rule:cloud:c/",
-              "label": "Plan pre-upload cleanup: cloud:c/",
+              "id": "pre_rule:mega:Frigate/",
+              "label": "Plan pre-upload cleanup: mega:Frigate/",
               "stage": "reservation",
               "kind": "cleanup",
+              "activity": "Cleanup",
               "status": "SUCCESS",
               "error": "",
-              "started_at": "2026-10-27T12:27:36.076835+00:00",
-              "finished_at": "2026-10-27T12:27:36.077191+00:00"
+              "started_at": "2026-10-27T13:02:46.256837+00:00",
+              "finished_at": "2026-10-27T13:02:46.257680+00:00"
             },
             {
-              "id": "pre_rule:cloud:c/Camera",
-              "label": "Plan pre-upload cleanup: cloud:c/Camera",
+              "id": "pre_rule:mega:Frigate/Camera",
+              "label": "Plan pre-upload cleanup: mega:Frigate/Camera",
               "stage": "reservation",
               "kind": "cleanup",
+              "activity": "Cleanup",
               "status": "SUCCESS",
               "error": "",
-              "started_at": "2026-10-27T12:27:36.077583+00:00",
-              "finished_at": "2026-10-27T12:27:36.078032+00:00"
+              "started_at": "2026-10-27T13:02:46.258669+00:00",
+              "finished_at": "2026-10-27T13:02:46.259555+00:00"
             },
             {
               "id": "reservation",
               "label": "Reserve space for selected upload files",
               "stage": "reservation",
               "kind": "planning",
+              "activity": "Quota planning",
               "status": "SUCCESS",
               "error": "",
-              "started_at": "2026-10-27T12:27:36.078399+00:00",
-              "finished_at": "2026-10-27T12:27:36.079028+00:00"
+              "started_at": "2026-10-27T13:02:46.260257+00:00",
+              "finished_at": "2026-10-27T13:02:46.260930+00:00"
             },
             {
               "id": "pre_delete",
               "label": "Execute pre-upload delete plan",
               "stage": "reservation",
               "kind": "cleanup",
+              "activity": "Cleanup",
               "status": "SKIPPED",
               "error": "No cleanup command required in this synthetic example",
-              "started_at": "2026-10-27T12:27:36.079640+00:00",
-              "finished_at": "2026-10-27T12:27:36.080028+00:00"
+              "started_at": "2026-10-27T13:02:46.261643+00:00",
+              "finished_at": "2026-10-27T13:02:46.262294+00:00"
             },
             {
               "id": "pre_trash",
               "label": "Pre-upload trash cleanup",
               "stage": "reservation",
               "kind": "cleanup",
+              "activity": "Trash cleanup",
               "status": "SKIPPED",
               "error": "No cleanup command required in this synthetic example",
-              "started_at": "2026-10-27T12:27:36.080364+00:00",
-              "finished_at": "2026-10-27T12:27:36.080762+00:00"
+              "started_at": "2026-10-27T13:02:46.262972+00:00",
+              "finished_at": "2026-10-27T13:02:46.263645+00:00"
             },
             {
               "id": "upload",
               "label": "Upload files (copy)",
               "stage": "upload",
               "kind": "upload",
+              "activity": "Upload",
               "status": "SUCCESS",
               "error": "",
-              "started_at": "2026-10-27T12:27:36.081103+00:00",
-              "finished_at": "2026-10-27T12:27:36.081435+00:00"
+              "started_at": "2026-10-27T13:02:46.264234+00:00",
+              "finished_at": "2026-10-27T13:02:46.264897+00:00"
             },
             {
               "id": "post_snapshot",
               "label": "Post-upload remote snapshot",
               "stage": "post_cleanup",
               "kind": "snapshot",
+              "activity": "Snapshot",
               "status": "SUCCESS",
               "error": "",
-              "started_at": "2026-10-27T12:27:36.081876+00:00",
-              "finished_at": "2026-10-27T12:27:36.082231+00:00"
+              "started_at": "2026-10-27T13:02:46.265445+00:00",
+              "finished_at": "2026-10-27T13:02:46.265909+00:00"
             },
             {
-              "id": "post_rule:cloud:c/",
-              "label": "Plan post-upload cleanup: cloud:c/",
+              "id": "post_rule:mega:Frigate/",
+              "label": "Plan post-upload cleanup: mega:Frigate/",
               "stage": "post_cleanup",
               "kind": "cleanup",
+              "activity": "Cleanup",
               "status": "SUCCESS",
               "error": "",
-              "started_at": "2026-10-27T12:27:36.082648+00:00",
-              "finished_at": "2026-10-27T12:27:36.083019+00:00"
+              "started_at": "2026-10-27T13:02:46.266399+00:00",
+              "finished_at": "2026-10-27T13:02:46.266843+00:00"
             },
             {
-              "id": "post_rule:cloud:c/Camera",
-              "label": "Plan post-upload cleanup: cloud:c/Camera",
+              "id": "post_rule:mega:Frigate/Camera",
+              "label": "Plan post-upload cleanup: mega:Frigate/Camera",
               "stage": "post_cleanup",
               "kind": "cleanup",
+              "activity": "Cleanup",
               "status": "SUCCESS",
               "error": "",
-              "started_at": "2026-10-27T12:27:36.083358+00:00",
-              "finished_at": "2026-10-27T12:27:36.083761+00:00"
+              "started_at": "2026-10-27T13:02:46.267307+00:00",
+              "finished_at": "2026-10-27T13:02:46.268130+00:00"
             },
             {
               "id": "post_quota",
               "label": "Plan post-upload total-size cleanup",
               "stage": "post_cleanup",
               "kind": "planning",
+              "activity": "Quota planning",
               "status": "SUCCESS",
               "error": "",
-              "started_at": "2026-10-27T12:27:36.084104+00:00",
-              "finished_at": "2026-10-27T12:27:36.084436+00:00"
+              "started_at": "2026-10-27T13:02:46.268841+00:00",
+              "finished_at": "2026-10-27T13:02:46.269306+00:00"
             },
             {
               "id": "post_delete",
               "label": "Execute post-upload delete plan",
               "stage": "post_cleanup",
               "kind": "cleanup",
+              "activity": "Cleanup",
               "status": "SKIPPED",
               "error": "No cleanup command required in this synthetic example",
-              "started_at": "2026-10-27T12:27:36.084822+00:00",
-              "finished_at": "2026-10-27T12:27:36.085158+00:00"
+              "started_at": "2026-10-27T13:02:46.269784+00:00",
+              "finished_at": "2026-10-27T13:02:46.270335+00:00"
             },
             {
               "id": "post_trash",
               "label": "Post-upload trash cleanup",
               "stage": "post_cleanup",
               "kind": "cleanup",
+              "activity": "Trash cleanup",
               "status": "SKIPPED",
               "error": "No cleanup command required in this synthetic example",
-              "started_at": "2026-10-27T12:27:36.085511+00:00",
-              "finished_at": "2026-10-27T12:27:36.085919+00:00"
+              "started_at": "2026-10-27T13:02:46.271083+00:00",
+              "finished_at": "2026-10-27T13:02:46.271790+00:00"
             },
             {
               "id": "final_snapshot",
               "label": "Final remote snapshot",
               "stage": "final_quota",
               "kind": "snapshot",
+              "activity": "Snapshot",
               "status": "SUCCESS",
               "error": "",
-              "started_at": "2026-10-27T12:27:36.086264+00:00",
-              "finished_at": "2026-10-27T12:27:36.086761+00:00"
+              "started_at": "2026-10-27T13:02:46.272513+00:00",
+              "finished_at": "2026-10-27T13:02:46.273222+00:00"
             },
             {
               "id": "verification",
               "label": "Verify all cleanup and remote limits",
               "stage": "final_quota",
               "kind": "verification",
+              "activity": "Verification",
               "status": "SUCCESS",
               "error": "",
-              "started_at": "2026-10-27T12:27:36.087362+00:00",
-              "finished_at": "2026-10-27T12:27:36.088061+00:00"
+              "started_at": "2026-10-27T13:02:46.273942+00:00",
+              "finished_at": "2026-10-27T13:02:46.274671+00:00"
             }
           ],
           "cleanup_jobs": [
             {
-              "path": "cloud:c/",
+              "path": "mega:Frigate/",
               "completed": 2,
               "total": 2,
               "running": 0,
@@ -501,7 +542,7 @@
               "post_status": "SUCCESS"
             },
             {
-              "path": "cloud:c/Camera",
+              "path": "mega:Frigate/Camera",
               "completed": 2,
               "total": 2,
               "running": 0,
@@ -527,6 +568,8 @@
       "schema_version": 1,
       "unit": "steps",
       "destination_count": 3,
+      "activity_counts": {},
+      "activity": "Finished",
       "active_destination_count": 0,
       "completed": 35,
       "total": 35,
@@ -545,27 +588,27 @@
     "job": "rclone-multithreaded-upload",
     "dry_run": false,
     "exit_code": 1,
-    "error": "Archive B - upload: Synthetic example: remote quota reached",
+    "error": "GDrive - upload: Synthetic example: remote quota reached",
     "stderr": "Synthetic example: remote quota reached\n",
     "warning": false,
     "schema_version": 1,
     "command": "rclone-multithreaded-upload",
     "comment": "",
-    "version": "0.0.31",
-    "timestamp": "2026-10-27T12:27:36.048301+00:00",
+    "version": "0.0.32",
+    "timestamp": "2026-10-27T13:02:46.230937+00:00",
     "host": "darkyere-VirtualBox",
     "run_id": "parallel-example-failure",
     "event": "rclone_multithreaded_upload_result",
     "script_name": "Frigate CCTV Upload",
     "application": "rclone-multithreaded-upload",
-    "application_version": "0.0.31",
+    "application_version": "0.0.32",
     "failed_remotes": [
-      "Archive B"
+      "GDrive"
     ],
     "remotes": [
       {
-        "name": "Archive A",
-        "remote_path": "cloud:a",
+        "name": "OneDrive",
+        "remote_path": "onedrive:Frigate",
         "status": "success",
         "stages": {
           "reservation": "SUCCESS",
@@ -575,9 +618,9 @@
         },
         "errors": [],
         "progress": {
-          "name": "Archive A",
+          "name": "OneDrive",
           "source": "/srv/frigate",
-          "destination": "cloud:a",
+          "destination": "onedrive:Frigate",
           "status": "success",
           "completed": 7,
           "total": 7,
@@ -588,76 +631,85 @@
           "skipped": 2,
           "pending": 0,
           "active_steps": [],
+          "activity_counts": {},
+          "activity": "Finished",
           "steps": [
             {
               "id": "pre_snapshot",
               "label": "Pre-upload remote snapshot",
               "stage": "reservation",
               "kind": "snapshot",
+              "activity": "Snapshot",
               "status": "SUCCESS",
               "error": "",
-              "started_at": "2026-10-27T12:27:35.862848+00:00",
-              "finished_at": "2026-10-27T12:27:35.863172+00:00"
+              "started_at": "2026-10-27T13:02:45.854898+00:00",
+              "finished_at": "2026-10-27T13:02:45.855303+00:00"
             },
             {
               "id": "pre_delete",
               "label": "Execute pre-upload delete plan",
               "stage": "reservation",
               "kind": "cleanup",
+              "activity": "Cleanup",
               "status": "SKIPPED",
               "error": "No script-managed deletion/trash activity in this synthetic example",
-              "started_at": "2026-10-27T12:27:35.863658+00:00",
-              "finished_at": "2026-10-27T12:27:35.864053+00:00"
+              "started_at": "2026-10-27T13:02:45.855800+00:00",
+              "finished_at": "2026-10-27T13:02:45.856212+00:00"
             },
             {
               "id": "upload",
               "label": "Upload files (copy)",
               "stage": "upload",
               "kind": "upload",
+              "activity": "Upload",
               "status": "SUCCESS",
               "error": "",
-              "started_at": "2026-10-27T12:27:35.876104+00:00",
-              "finished_at": "2026-10-27T12:27:36.029177+00:00"
+              "started_at": "2026-10-27T13:02:45.873852+00:00",
+              "finished_at": "2026-10-27T13:02:46.205935+00:00"
             },
             {
               "id": "post_snapshot",
               "label": "Post-upload remote snapshot",
               "stage": "post_cleanup",
               "kind": "snapshot",
+              "activity": "Snapshot",
               "status": "SUCCESS",
               "error": "",
-              "started_at": "2026-10-27T12:27:36.029631+00:00",
-              "finished_at": "2026-10-27T12:27:36.029968+00:00"
+              "started_at": "2026-10-27T13:02:46.206356+00:00",
+              "finished_at": "2026-10-27T13:02:46.206795+00:00"
             },
             {
               "id": "post_delete",
               "label": "Execute post-upload delete plan",
               "stage": "post_cleanup",
               "kind": "cleanup",
+              "activity": "Cleanup",
               "status": "SKIPPED",
               "error": "No files/trash require cleanup in this synthetic example",
-              "started_at": "2026-10-27T12:27:36.030312+00:00",
-              "finished_at": "2026-10-27T12:27:36.030814+00:00"
+              "started_at": "2026-10-27T13:02:46.207193+00:00",
+              "finished_at": "2026-10-27T13:02:46.207587+00:00"
             },
             {
               "id": "final_snapshot",
               "label": "Final remote snapshot",
               "stage": "final_quota",
               "kind": "snapshot",
+              "activity": "Snapshot",
               "status": "SUCCESS",
               "error": "",
-              "started_at": "2026-10-27T12:27:36.031146+00:00",
-              "finished_at": "2026-10-27T12:27:36.031463+00:00"
+              "started_at": "2026-10-27T13:02:46.207977+00:00",
+              "finished_at": "2026-10-27T13:02:46.208359+00:00"
             },
             {
               "id": "verification",
               "label": "Verify all cleanup and remote limits",
               "stage": "final_quota",
               "kind": "verification",
+              "activity": "Verification",
               "status": "SUCCESS",
               "error": "",
-              "started_at": "2026-10-27T12:27:36.031880+00:00",
-              "finished_at": "2026-10-27T12:27:36.032212+00:00"
+              "started_at": "2026-10-27T13:02:46.208756+00:00",
+              "finished_at": "2026-10-27T13:02:46.209155+00:00"
             }
           ],
           "cleanup_jobs": [],
@@ -673,8 +725,8 @@
         }
       },
       {
-        "name": "Archive B",
-        "remote_path": "cloud:b",
+        "name": "GDrive",
+        "remote_path": "gdrive:Frigate",
         "status": "failed",
         "stages": {
           "reservation": "SUCCESS",
@@ -689,9 +741,9 @@
           }
         ],
         "progress": {
-          "name": "Archive B",
+          "name": "GDrive",
           "source": "/srv/frigate",
-          "destination": "cloud:b",
+          "destination": "gdrive:Frigate",
           "status": "failure",
           "completed": 12,
           "total": 12,
@@ -702,131 +754,145 @@
           "skipped": 2,
           "pending": 0,
           "active_steps": [],
+          "activity_counts": {},
+          "activity": "Finished",
           "steps": [
             {
               "id": "pre_snapshot",
               "label": "Pre-upload remote snapshot",
               "stage": "reservation",
               "kind": "snapshot",
+              "activity": "Snapshot",
               "status": "SUCCESS",
               "error": "",
-              "started_at": "2026-10-27T12:27:35.865187+00:00",
-              "finished_at": "2026-10-27T12:27:35.865590+00:00"
+              "started_at": "2026-10-27T13:02:45.857008+00:00",
+              "finished_at": "2026-10-27T13:02:45.857384+00:00"
             },
             {
               "id": "local_snapshot",
               "label": "Acquire filtered local file snapshot",
               "stage": "reservation",
               "kind": "snapshot",
+              "activity": "Snapshot",
               "status": "SUCCESS",
               "error": "",
-              "started_at": "2026-10-27T12:27:35.865922+00:00",
-              "finished_at": "2026-10-27T12:27:35.866266+00:00"
+              "started_at": "2026-10-27T13:02:45.858000+00:00",
+              "finished_at": "2026-10-27T13:02:45.858629+00:00"
             },
             {
-              "id": "pre_rule:cloud:b/",
-              "label": "Plan pre-upload cleanup: cloud:b/",
+              "id": "pre_rule:gdrive:Frigate/",
+              "label": "Plan pre-upload cleanup: gdrive:Frigate/",
               "stage": "reservation",
               "kind": "cleanup",
+              "activity": "Cleanup",
               "status": "SUCCESS",
               "error": "",
-              "started_at": "2026-10-27T12:27:35.866655+00:00",
-              "finished_at": "2026-10-27T12:27:35.867030+00:00"
+              "started_at": "2026-10-27T13:02:45.859245+00:00",
+              "finished_at": "2026-10-27T13:02:45.859867+00:00"
             },
             {
               "id": "reservation",
               "label": "Reserve space for selected upload files",
               "stage": "reservation",
               "kind": "planning",
+              "activity": "Quota planning",
               "status": "SUCCESS",
               "error": "",
-              "started_at": "2026-10-27T12:27:35.867366+00:00",
-              "finished_at": "2026-10-27T12:27:35.867932+00:00"
+              "started_at": "2026-10-27T13:02:45.860515+00:00",
+              "finished_at": "2026-10-27T13:02:45.861137+00:00"
             },
             {
               "id": "pre_delete",
               "label": "Execute pre-upload delete plan",
               "stage": "reservation",
               "kind": "cleanup",
+              "activity": "Cleanup",
               "status": "SKIPPED",
               "error": "No script-managed deletion/trash activity in this synthetic example",
-              "started_at": "2026-10-27T12:27:35.868510+00:00",
-              "finished_at": "2026-10-27T12:27:35.869078+00:00"
+              "started_at": "2026-10-27T13:02:45.861779+00:00",
+              "finished_at": "2026-10-27T13:02:45.862410+00:00"
             },
             {
               "id": "upload",
               "label": "Upload files (copy)",
               "stage": "upload",
               "kind": "upload",
+              "activity": "Upload",
               "status": "FAILED",
               "error": "Synthetic example: remote quota reached",
-              "started_at": "2026-10-27T12:27:35.876404+00:00",
-              "finished_at": "2026-10-27T12:27:36.027902+00:00"
+              "started_at": "2026-10-27T13:02:45.874228+00:00",
+              "finished_at": "2026-10-27T13:02:46.204343+00:00"
             },
             {
               "id": "post_snapshot",
               "label": "Post-upload remote snapshot",
               "stage": "post_cleanup",
               "kind": "snapshot",
+              "activity": "Snapshot",
               "status": "SUCCESS",
               "error": "",
-              "started_at": "2026-10-27T12:27:36.033747+00:00",
-              "finished_at": "2026-10-27T12:27:36.034075+00:00"
+              "started_at": "2026-10-27T13:02:46.210871+00:00",
+              "finished_at": "2026-10-27T13:02:46.211325+00:00"
             },
             {
-              "id": "post_rule:cloud:b/",
-              "label": "Plan post-upload cleanup: cloud:b/",
+              "id": "post_rule:gdrive:Frigate/",
+              "label": "Plan post-upload cleanup: gdrive:Frigate/",
               "stage": "post_cleanup",
               "kind": "cleanup",
+              "activity": "Cleanup",
               "status": "SUCCESS",
               "error": "",
-              "started_at": "2026-10-27T12:27:36.034398+00:00",
-              "finished_at": "2026-10-27T12:27:36.034772+00:00"
+              "started_at": "2026-10-27T13:02:46.211714+00:00",
+              "finished_at": "2026-10-27T13:02:46.212121+00:00"
             },
             {
               "id": "post_quota",
               "label": "Plan post-upload total-size cleanup",
               "stage": "post_cleanup",
               "kind": "planning",
+              "activity": "Quota planning",
               "status": "SUCCESS",
               "error": "",
-              "started_at": "2026-10-27T12:27:36.035095+00:00",
-              "finished_at": "2026-10-27T12:27:36.035415+00:00"
+              "started_at": "2026-10-27T13:02:46.212504+00:00",
+              "finished_at": "2026-10-27T13:02:46.212909+00:00"
             },
             {
               "id": "post_delete",
               "label": "Execute post-upload delete plan",
               "stage": "post_cleanup",
               "kind": "cleanup",
+              "activity": "Cleanup",
               "status": "SKIPPED",
               "error": "No files/trash require cleanup in this synthetic example",
-              "started_at": "2026-10-27T12:27:36.035786+00:00",
-              "finished_at": "2026-10-27T12:27:36.036109+00:00"
+              "started_at": "2026-10-27T13:02:46.213396+00:00",
+              "finished_at": "2026-10-27T13:02:46.213904+00:00"
             },
             {
               "id": "final_snapshot",
               "label": "Final remote snapshot",
               "stage": "final_quota",
               "kind": "snapshot",
+              "activity": "Snapshot",
               "status": "SUCCESS",
               "error": "",
-              "started_at": "2026-10-27T12:27:36.036574+00:00",
-              "finished_at": "2026-10-27T12:27:36.037079+00:00"
+              "started_at": "2026-10-27T13:02:46.214330+00:00",
+              "finished_at": "2026-10-27T13:02:46.214852+00:00"
             },
             {
               "id": "verification",
               "label": "Verify all cleanup and remote limits",
               "stage": "final_quota",
               "kind": "verification",
+              "activity": "Verification",
               "status": "SUCCESS",
               "error": "",
-              "started_at": "2026-10-27T12:27:36.037410+00:00",
-              "finished_at": "2026-10-27T12:27:36.037834+00:00"
+              "started_at": "2026-10-27T13:02:46.215348+00:00",
+              "finished_at": "2026-10-27T13:02:46.215860+00:00"
             }
           ],
           "cleanup_jobs": [
             {
-              "path": "cloud:b/",
+              "path": "gdrive:Frigate/",
               "completed": 2,
               "total": 2,
               "running": 0,
@@ -848,8 +914,8 @@
         }
       },
       {
-        "name": "Archive C",
-        "remote_path": "cloud:c",
+        "name": "Mega",
+        "remote_path": "mega:Frigate",
         "status": "success",
         "stages": {
           "reservation": "SUCCESS",
@@ -859,9 +925,9 @@
         },
         "errors": [],
         "progress": {
-          "name": "Archive C",
+          "name": "Mega",
           "source": "/srv/frigate",
-          "destination": "cloud:c",
+          "destination": "mega:Frigate",
           "status": "success",
           "completed": 16,
           "total": 16,
@@ -872,171 +938,189 @@
           "skipped": 4,
           "pending": 0,
           "active_steps": [],
+          "activity_counts": {},
+          "activity": "Finished",
           "steps": [
             {
               "id": "pre_snapshot",
               "label": "Pre-upload remote snapshot",
               "stage": "reservation",
               "kind": "snapshot",
+              "activity": "Snapshot",
               "status": "SUCCESS",
               "error": "",
-              "started_at": "2026-10-27T12:27:35.870206+00:00",
-              "finished_at": "2026-10-27T12:27:35.870774+00:00"
+              "started_at": "2026-10-27T13:02:45.863570+00:00",
+              "finished_at": "2026-10-27T13:02:45.863965+00:00"
             },
             {
               "id": "local_snapshot",
               "label": "Acquire filtered local file snapshot",
               "stage": "reservation",
               "kind": "snapshot",
+              "activity": "Snapshot",
               "status": "SUCCESS",
               "error": "",
-              "started_at": "2026-10-27T12:27:35.871325+00:00",
-              "finished_at": "2026-10-27T12:27:35.871900+00:00"
+              "started_at": "2026-10-27T13:02:45.864617+00:00",
+              "finished_at": "2026-10-27T13:02:45.865397+00:00"
             },
             {
-              "id": "pre_rule:cloud:c/",
-              "label": "Plan pre-upload cleanup: cloud:c/",
+              "id": "pre_rule:mega:Frigate/",
+              "label": "Plan pre-upload cleanup: mega:Frigate/",
               "stage": "reservation",
               "kind": "cleanup",
+              "activity": "Cleanup",
               "status": "SUCCESS",
               "error": "",
-              "started_at": "2026-10-27T12:27:35.872323+00:00",
-              "finished_at": "2026-10-27T12:27:35.872764+00:00"
+              "started_at": "2026-10-27T13:02:45.866254+00:00",
+              "finished_at": "2026-10-27T13:02:45.867271+00:00"
             },
             {
-              "id": "pre_rule:cloud:c/Camera",
-              "label": "Plan pre-upload cleanup: cloud:c/Camera",
+              "id": "pre_rule:mega:Frigate/Camera",
+              "label": "Plan pre-upload cleanup: mega:Frigate/Camera",
               "stage": "reservation",
               "kind": "cleanup",
+              "activity": "Cleanup",
               "status": "SUCCESS",
               "error": "",
-              "started_at": "2026-10-27T12:27:35.873081+00:00",
-              "finished_at": "2026-10-27T12:27:35.873407+00:00"
+              "started_at": "2026-10-27T13:02:45.868151+00:00",
+              "finished_at": "2026-10-27T13:02:45.868945+00:00"
             },
             {
               "id": "reservation",
               "label": "Reserve space for selected upload files",
               "stage": "reservation",
               "kind": "planning",
+              "activity": "Quota planning",
               "status": "SUCCESS",
               "error": "",
-              "started_at": "2026-10-27T12:27:35.873781+00:00",
-              "finished_at": "2026-10-27T12:27:35.874118+00:00"
+              "started_at": "2026-10-27T13:02:45.869780+00:00",
+              "finished_at": "2026-10-27T13:02:45.870668+00:00"
             },
             {
               "id": "pre_delete",
               "label": "Execute pre-upload delete plan",
               "stage": "reservation",
               "kind": "cleanup",
+              "activity": "Cleanup",
               "status": "SKIPPED",
               "error": "No script-managed deletion/trash activity in this synthetic example",
-              "started_at": "2026-10-27T12:27:35.874429+00:00",
-              "finished_at": "2026-10-27T12:27:35.874794+00:00"
+              "started_at": "2026-10-27T13:02:45.871492+00:00",
+              "finished_at": "2026-10-27T13:02:45.872197+00:00"
             },
             {
               "id": "pre_trash",
               "label": "Pre-upload trash cleanup",
               "stage": "reservation",
               "kind": "cleanup",
+              "activity": "Trash cleanup",
               "status": "SKIPPED",
               "error": "No script-managed deletion/trash activity in this synthetic example",
-              "started_at": "2026-10-27T12:27:35.875105+00:00",
-              "finished_at": "2026-10-27T12:27:35.875440+00:00"
+              "started_at": "2026-10-27T13:02:45.872678+00:00",
+              "finished_at": "2026-10-27T13:02:45.873060+00:00"
             },
             {
               "id": "upload",
               "label": "Upload files (copy)",
               "stage": "upload",
               "kind": "upload",
+              "activity": "Upload",
               "status": "SUCCESS",
               "error": "",
-              "started_at": "2026-10-27T12:27:35.876782+00:00",
-              "finished_at": "2026-10-27T12:27:36.039337+00:00"
+              "started_at": "2026-10-27T13:02:45.874625+00:00",
+              "finished_at": "2026-10-27T13:02:46.218107+00:00"
             },
             {
               "id": "post_snapshot",
               "label": "Post-upload remote snapshot",
               "stage": "post_cleanup",
               "kind": "snapshot",
+              "activity": "Snapshot",
               "status": "SUCCESS",
               "error": "",
-              "started_at": "2026-10-27T12:27:36.039738+00:00",
-              "finished_at": "2026-10-27T12:27:36.040062+00:00"
+              "started_at": "2026-10-27T13:02:46.218781+00:00",
+              "finished_at": "2026-10-27T13:02:46.219351+00:00"
             },
             {
-              "id": "post_rule:cloud:c/",
-              "label": "Plan post-upload cleanup: cloud:c/",
+              "id": "post_rule:mega:Frigate/",
+              "label": "Plan post-upload cleanup: mega:Frigate/",
               "stage": "post_cleanup",
               "kind": "cleanup",
+              "activity": "Cleanup",
               "status": "SUCCESS",
               "error": "",
-              "started_at": "2026-10-27T12:27:36.040384+00:00",
-              "finished_at": "2026-10-27T12:27:36.040791+00:00"
+              "started_at": "2026-10-27T13:02:46.219784+00:00",
+              "finished_at": "2026-10-27T13:02:46.220314+00:00"
             },
             {
-              "id": "post_rule:cloud:c/Camera",
-              "label": "Plan post-upload cleanup: cloud:c/Camera",
+              "id": "post_rule:mega:Frigate/Camera",
+              "label": "Plan post-upload cleanup: mega:Frigate/Camera",
               "stage": "post_cleanup",
               "kind": "cleanup",
+              "activity": "Cleanup",
               "status": "SUCCESS",
               "error": "",
-              "started_at": "2026-10-27T12:27:36.041115+00:00",
-              "finished_at": "2026-10-27T12:27:36.041451+00:00"
+              "started_at": "2026-10-27T13:02:46.220880+00:00",
+              "finished_at": "2026-10-27T13:02:46.221324+00:00"
             },
             {
               "id": "post_quota",
               "label": "Plan post-upload total-size cleanup",
               "stage": "post_cleanup",
               "kind": "planning",
+              "activity": "Quota planning",
               "status": "SUCCESS",
               "error": "",
-              "started_at": "2026-10-27T12:27:36.041883+00:00",
-              "finished_at": "2026-10-27T12:27:36.042212+00:00"
+              "started_at": "2026-10-27T13:02:46.221803+00:00",
+              "finished_at": "2026-10-27T13:02:46.222268+00:00"
             },
             {
               "id": "post_delete",
               "label": "Execute post-upload delete plan",
               "stage": "post_cleanup",
               "kind": "cleanup",
+              "activity": "Cleanup",
               "status": "SKIPPED",
               "error": "No files/trash require cleanup in this synthetic example",
-              "started_at": "2026-10-27T12:27:36.042615+00:00",
-              "finished_at": "2026-10-27T12:27:36.043012+00:00"
+              "started_at": "2026-10-27T13:02:46.222953+00:00",
+              "finished_at": "2026-10-27T13:02:46.223702+00:00"
             },
             {
               "id": "post_trash",
               "label": "Post-upload trash cleanup",
               "stage": "post_cleanup",
               "kind": "cleanup",
+              "activity": "Trash cleanup",
               "status": "SKIPPED",
               "error": "No files/trash require cleanup in this synthetic example",
-              "started_at": "2026-10-27T12:27:36.043355+00:00",
-              "finished_at": "2026-10-27T12:27:36.043770+00:00"
+              "started_at": "2026-10-27T13:02:46.224376+00:00",
+              "finished_at": "2026-10-27T13:02:46.225085+00:00"
             },
             {
               "id": "final_snapshot",
               "label": "Final remote snapshot",
               "stage": "final_quota",
               "kind": "snapshot",
+              "activity": "Snapshot",
               "status": "SUCCESS",
               "error": "",
-              "started_at": "2026-10-27T12:27:36.044160+00:00",
-              "finished_at": "2026-10-27T12:27:36.044503+00:00"
+              "started_at": "2026-10-27T13:02:46.225782+00:00",
+              "finished_at": "2026-10-27T13:02:46.226504+00:00"
             },
             {
               "id": "verification",
               "label": "Verify all cleanup and remote limits",
               "stage": "final_quota",
               "kind": "verification",
+              "activity": "Verification",
               "status": "SUCCESS",
               "error": "",
-              "started_at": "2026-10-27T12:27:36.044954+00:00",
-              "finished_at": "2026-10-27T12:27:36.045511+00:00"
+              "started_at": "2026-10-27T13:02:46.227191+00:00",
+              "finished_at": "2026-10-27T13:02:46.227866+00:00"
             }
           ],
           "cleanup_jobs": [
             {
-              "path": "cloud:c/",
+              "path": "mega:Frigate/",
               "completed": 2,
               "total": 2,
               "running": 0,
@@ -1046,7 +1130,7 @@
               "post_status": "SUCCESS"
             },
             {
-              "path": "cloud:c/Camera",
+              "path": "mega:Frigate/Camera",
               "completed": 2,
               "total": 2,
               "running": 0,
@@ -1072,6 +1156,8 @@
       "schema_version": 1,
       "unit": "steps",
       "destination_count": 3,
+      "activity_counts": {},
+      "activity": "Finished",
       "active_destination_count": 0,
       "completed": 35,
       "total": 35,

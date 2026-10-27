@@ -10,6 +10,25 @@ Rollover rule:
 
 `0.0.100` is not used.
 
+## 0.0.32
+
+Dynamic destination overview and combined live activity summary.
+
+### Code and card
+
+- Incremented the application version from 0.0.31 to 0.0.32.
+- Added readable activity metadata and active counts to existing locked step snapshots, per destination and overall. Explicitly distinguish Upload, Cleanup and Trash cleanup; also identify snapshots, quota planning, waits and verification. Derive every label/count from currently running observations; idle/final snapshots retain no stale active category.
+- Added the compact manufacturer-card destination table beneath overall progress. Rows follow the effective `upload_directories` list, displaying configured names, current operations, independent settled/total counts, percentages and states. Detailed per-destination steps/cleanup-path views remain below it.
+- Added combined actual activities to the top phase display, table-cell escaping, prior detailed-payload fallback, and a failure marker that remains visible during permitted later work.
+- Kept manufacturer/role recognition and auto-filled entity lookup, custom ASUS preset, completion/live independence, completion module/automation, transport, rclone operations, safety rules and stage barriers unchanged. No configuration options were added.
+
+### Documentation and validation
+
+- Updated current usage and live/progress guides, all affected function explanations and code-map test entries; preserved the owner's exact disclaimer and complete config examples.
+- Updated synthetic JSON/rendered examples to OneDrive, GDrive and Mega, including simultaneous upload/cleanup/trash activity.
+- Extended offline tests for dynamic addition/removal of destinations, independent totals, mixed activities, overview placement, old payloads, escaped names and removal of stale active labels. Existing concurrent real-operation observers and fake-rclone entrypoint checks remain in the suite.
+- Included a full clean project ZIP, original/previous manifest comparison, file/archive hashes and verification report. No production broker, HA instance or cloud data was accessed.
+
 ## 0.0.31
 
 Concurrent per-destination workflow progress and whole-run aggregation.

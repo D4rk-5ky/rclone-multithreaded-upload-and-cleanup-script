@@ -1,6 +1,6 @@
 # rclone-multithreaded-upload
 
-Version 0.0.31
+Version 0.0.32
 
 `rclone-multithreaded-upload` uploads one or more local directories to independent rclone destinations while enforcing configured age, file-count, folder-size, and managed remote-size limits.
 
@@ -344,7 +344,7 @@ Every thread limit must be at least `1`.
 
 | Option | Required | Meaning |
 | --- | --- | --- |
-| `name` | No | Friendly name used in summaries. |
+| `name` | No | Friendly destination name used in summaries and the live overview table, for example `OneDrive`, `GDrive` or `Mega`. Falls back to `remote_path` if omitted. |
 | `local_path` | Yes | Local source directory. |
 | `remote_path` | Yes | Rclone destination root, for example `EncryptedDrive:CCTV`. The exact same `remote_path` may not appear twice: duplicate destinations produce a safety warning and the config is rejected before any remote work starts. |
 | `upload_command` | No | `copy`, `sync`, or `move`. Default `copy`. |
@@ -637,3 +637,7 @@ The optional `asus-frigate-live-preview-card.yaml` is the same detailed card pre
 For internal function-by-function behavior, see `commented_code_map.md`. For release history, see `VERSIONING.md`.
 
 Each destination also exposes `cleanup_jobs`: an independent view of each configured cleanup path, with its own pre/post planning states and settled/total count (normally two planning steps). These are views of the same steps and are never counted again in the overall total. Actual deletion stays in the existing combined delete-plan operation. The card displays these per-path counts above the full destination step table.
+
+The live card puts overall run progress above a dynamic destination table. Each row shows that destination's current operation, settled/total steps, percentage and state. The run's activity summary counts all active operations, distinguishing Upload, Cleanup and Trash cleanup, as well as snapshots, quota planning, waiting and verification. The denominator is the sum of each destination's own config-derived plan, so differently configured destinations can have different totals.
+
+To show OneDrive, GDrive and Mega, configure three entries in `upload_directories`, with the corresponding `name` and your actual rclone `remote_path` for each. Add or remove entries there to change the live table; no card edits or fixed destination count are needed. Individual cleanup rules and complete step tables appear below the overview. See [PARALLEL_PROGRESS.md](PARALLEL_PROGRESS.md) and the rendered [three-destination preview](parallel-progress-preview.md).
