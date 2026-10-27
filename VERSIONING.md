@@ -10,6 +10,61 @@ Rollover rule:
 
 `0.0.100` is not used.
 
+## 0.0.35
+
+Owner-requested removal of obsolete compatibility code and redundant helpers.
+
+### Code/config/API changes
+
+- Incremented 0.0.34 to 0.0.35. Removed the root mqtt translator, old timeout/keepalive/retain/TLS option handling and historical topic/QoS defaults. Only completion/live config sections are supported for reporting.
+- Replaced parse_mqtt_config with parse_completion_config and model-level MqttConfig alias imports with the canonical MQTTConfig. Internal runtime state now uses completion. Removed the unused package __version__ alias; VERSION remains the single app version constant.
+- Reused one unknown-key validator for root, thread limits, uploads, cleanup rules and reporting. Unsupported/obsolete fields fail validation before work instead of being ignored. Current config defaults/options and both complete examples remain unchanged.
+- Removed unused compatibility helpers get_upload_remote_quota_entries, get_filtered_local_upload_size, join_relative_path, build_mqtt_status_payload and the unused RemoteQuotaFile model. Removed the unused sleep_after_step helper and one-line publish_result_payload wrapper; current callers use the real implementations.
+- Replaced duplicate source/transfer-option scanners with split_copy_options, preserving option order/values and source-cache keys/exact upload selection. Removed a write-only reservation-byte map while retaining the locked planned file list and computed quota/summary values.
+- Removed cleanup.py's obsolete execute_delete_plan re-export/__all__ and unused imports; phase callers import the actual delete-plan implementation directly.
+- Removed refresh_live's ignored positional current-item argument; current callers request an explicit clear_current flag at finish. Progress still summarizes every active destination atomically.
+- Removed duplicate completion fields script_name/application/application_version; standard name/job/version remain, along with event/remotes/failed_remotes/progress. HA automation already uses the standard fields. Full live JSON/manufacturer/role behavior is unchanged.
+- Preserved actual backend wrapper handling, deletion eligibility/modes, quota selection, stage barriers, locking, signal supervision and standard MQTT/HA contracts.
+
+### Documentation/counts/validation
+
+- Updated current README/config/API/JSON explanations and all affected function/command entries, retaining the exact owner disclaimer and the lean example-file inventory.
+- Retargeted tests from deleted adapters to canonical APIs; retained source-cache coverage and added rejection of obsolete/unknown keys at every config level. Extended option-partition checks; no safety/process tests removed.
+- Regenerated the one success/failure packet file and one live packet file. Both config examples and retained HA YAML files remain complete.
+- Recorded reproducible before/after physical Python lines and code lines (excluding blank/comment/docstring-only lines), separating runtime and tests, in verification_report.txt and RELEASE_MANIFEST.json. Counts cover all shipped Python files; docs/JSON/YAML are separately identified.
+- Verified compile/basic CLI/config checks and the full offline suite; packaged the complete clean project with original/previous inventory checks, hashes and count comparison. No real broker, HA or cloud data was exercised.
+
+## 0.0.34
+
+Owner-requested package/example cleanup.
+
+- Incremented 0.0.33 to 0.0.34; runtime behavior, safety, termination handling and MQTT/HA contracts are unchanged.
+- Kept both complete config examples, one payload-examples.json file containing success/failure packets, and one live-payload-examples.json packet showing three independently progressing destinations. Reduced repeated sample snapshots; generated examples through the real tracker/adapter without commands or broker I/O.
+- Removed ha-discovery-examples.json, parallel-progress-examples.json and parallel-progress-preview.md as redundant generated/reference artifacts.
+- Retained manufacturer-live-preview-card.yaml as the single canonical live card. Removed duplicate manufacturer-live-preview-card.md, environment-specific asus-frigate-live-preview-card.yaml and the superseded fixed-entity home-assistant-live-dashboard.example.yaml. Custom manufacturers now use the documented one-line selector edit; installed cards remain compatible.
+- Consolidated unique PARALLEL_PROGRESS.md schema/status guidance into LIVE_PREVIEW.md and retained the step-total formula in README.md. Removed the separate TEMPLATE_COMPATIBILITY.md development audit; current contracts/provenance remain in guides and release metadata.
+- Updated tests to render the retained YAML directly and check the complete template. Updated current usage, function/command explanations and ignore entries; preserved source, dependencies, test suite, owner disclaimer, required docs and release integrity files.
+- This release intentionally removes eight redundant files under the owner's cleanup request. The release manifest records each removal against original/previous inventories with its reason, rather than claiming every old optional artifact was retained. Previous delivered versions remain available unchanged.
+- Verified compile/CLI/config/schema/card checks and the complete offline suite, then packaged a clean full ZIP with hashes. No production broker, cloud data or live HA instance was exercised.
+
+## 0.0.33
+
+Owned process-tree termination and bounded cancellation.
+
+### Code
+
+- Incremented 0.0.32 to 0.0.33. The compatibility CLI now supervises normal jobs in a fresh POSIX session/process group; help/version/validation and private publisher hooks retain direct behavior.
+- Added process_lifecycle.py: supervisor signal forwarding, five-second shutdown deadline, repeated-signal force kill, job-owner pipe watchdog for supervisor SIGKILL, inner-job signal notification pipe, owned-group cleanup, Linux pidfd child escalation and child-subreaper adoption/reaping.
+- Added cooperative cancellation checks before rclone launches, cancellation-aware pool barriers that discard queued work, and interruptible configured waits. Existing successful execution order, commands, deletion policies, quota selection and locks remain intact.
+- SIGINT/SIGTERM/SIGHUP/SIGQUIT stop signals request cancellation and preserve signal exit codes; repeated inner signals do not interrupt finalization again. Final MQTT/live interruption reports remain best-effort within the shutdown window. Completion/live template files and success/failure JSON/card formats are unchanged.
+- The supervisor handles lingering group members on normal or abnormal job exit. A killed supervisor is detected by pipe EOF; a killed job is detected by its supervisor. SIGKILL still cannot execute notifications or lock cleanup.
+
+### Documentation and validation
+
+- Added PROCESS_LIFECYCLE.md and updated current README usage, process/lock behavior, function/command map and compatibility notes. Preserved the exact owner disclaimer, all original files and complete configuration examples; no config fields were added.
+- Added 11 lifecycle/cancellation tests using the real CLI and harmless rclone/Paho process fakes, including descendants that ignore stop signals, both displayed app PIDs, a shutdown deadline, repeated signals, normal leftovers and an unrelated sentinel.
+- Re-ran the complete offline suite, compile/CLI/config checks and source safety comparisons. Packaged the full project with original/previous manifest checks, hashes and a readable verification report. Real cloud/broker operation and frozen/other-platform execution remain untested.
+
 ## 0.0.32
 
 Dynamic destination overview and combined live activity summary.

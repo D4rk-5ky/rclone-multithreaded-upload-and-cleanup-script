@@ -1,11 +1,11 @@
-"""Single-instance lock handling and configured delays."""
+"""Single-instance lock and stop-signal handling."""
 
 import os
 import sys
-import time
 
-from .output import print_error, print_step
+from .output import print_error
 from .state import STATE
+from .process_lifecycle import request_cancellation, notify_supervisor
 
 
 def acquire_lock():
@@ -39,11 +39,8 @@ def release_lock():
 
 def signal_handler(signum, frame):
     del frame
-    print_error(f"Received signal {signum}, exiting.")
+    first = request_cancellation()
     # main finalizes both reporting channels before releasing the exclusive lock.
-    sys.exit(128 + signum)
-
-
-def sleep_after_step():
-    print_step(f"Sleeping for {STATE.sleep_after_step}s")
-    time.sleep(STATE.sleep_after_step)
+    if first:
+        notify_supervisor(signum)
+        sys.exit(128 + signum)

@@ -1,6 +1,6 @@
 # rclone-multithreaded-upload
 
-Version 0.0.32
+Version 0.0.35
 
 `rclone-multithreaded-upload` uploads one or more local directories to independent rclone destinations while enforcing configured age, file-count, folder-size, and managed remote-size limits.
 
@@ -144,7 +144,7 @@ The planned denominator is fixed at initialization from each destination's actua
 
 The base steps are the three remote snapshots, two combined delete-plan executions, upload and final verification. Commands with no work to do are labelled skipped. Cleanup-rule planning is tracked per path; the actual deletes remain combined by destination/delete mode. Shared cached local snapshots are acquired once per destination logically while retaining the existing single actual source listing.
 
-Use the updated `manufacturer-live-preview-card.yaml`; its manufacturer recognition and automatic role lookup remain unchanged. The card includes detailed destinations beneath the overall job. `--validate-config` prints the planned overall and per-destination totals without executing anything. See [LIVE_PREVIEW.md](LIVE_PREVIEW.md) and [PARALLEL_PROGRESS.md](PARALLEL_PROGRESS.md) for the schema and interpretation. The synthetic `parallel-progress-examples.json` and rendered `parallel-progress-preview.md` show three destinations uploading concurrently.
+Use the updated `manufacturer-live-preview-card.yaml`; its manufacturer recognition and automatic role lookup remain unchanged. The card includes detailed destinations beneath the overall job. `--validate-config` prints the planned overall and per-destination totals without executing anything. See [LIVE_PREVIEW.md](LIVE_PREVIEW.md) for the detailed schema. The single `live-payload-examples.json` packet shows three destinations uploading concurrently.
 
 ## Failure isolation
 
@@ -298,10 +298,9 @@ Start from `config.example.json` or the CCTV-oriented `rclone-cctv-config.exampl
 
 | Option | Required | Meaning |
 | --- | --- | --- |
-| `script_name` | No | Friendly name for this configured job/run. It is printed in the startup summary and included as `script_name` in the MQTT result payload. Default `rclone-multithreaded-upload`. |
+| `script_name` | No | Friendly name for this configured job/run. It is printed in the startup summary and included as `name`/`title` in the MQTT result payload. Default `rclone-multithreaded-upload`. |
 | `completion` | No | Syncerate-template final success/failure MQTT reports. Disabled by default. |
 | `live` | No | Independent HA live progress, heartbeat, discovery and retained last result. Disabled by default. |
-| `mqtt` | No | Legacy completion-only alias; see `MQTT.md` for migration. Do not combine with `completion`. |
 | `comment` | No | Optional string included in the completion report. |
 | `delete_min_age` | No | Rclone-style age/duration used by cleanup rules that have `delete_old_files=true`. Default runtime value is `31d`. The value is fully parsed during config loading/`--validate-config`; invalid durations or timestamps are rejected before execution. |
 | `lock_file` | No | Single-instance lock-file path. |
@@ -309,6 +308,8 @@ Start from `config.example.json` or the CCTV-oriented `rclone-cctv-config.exampl
 | `sleep_after_step` | No | Seconds each eligible remote waits after pre-upload trash cleanup before the upload barrier can complete. Non-negative integer. |
 | `thread_limits` | No | Object containing the four worker limits below. |
 | `upload_directories` | Yes | Non-empty list of upload destinations. |
+
+Config keys are validated at the root, thread-limit, upload, cleanup-rule and reporting levels. Unsupported keys fail before the job acquires a lock or starts rclone. Use the current `completion` section and `timeout` option; a root `mqtt` section and options such as `publish_timeout`, `keepalive`, `retain` or `tls_insecure` are not accepted or translated. Both supplied config examples use the supported format.
 
 ### MQTT completion and independent HA live preview
 
@@ -323,11 +324,11 @@ The application uses the supplied completion module 1.1.0 and live-preview modul
 
 Set your broker host, credentials and topics separately in each enabled section. Install the optional dependency with `python3 -m pip install -r requirements-mqtt.txt`. Check the complete config with `python3 rclone-multithreaded-upload.py --config config.json --validate-config`; validation never publishes.
 
-Completion JSON includes all template fields: `status`, boolean `success`, `title`, `name`, `job`, boolean `dry_run`, integer `exit_code`, string `error`/`stderr`, boolean `warning`, and schema/command/comment/version/timestamp/host/run metadata. The name/title come from `script_name`, and job/command identify `rclone-multithreaded-upload`. The existing `script_name`, `failed_remotes`, per-remote stages/errors and application metadata remain as extensions. A successful report has `error: ""`.
+Completion JSON includes all template fields: `status`, boolean `success`, `title`, `name`, `job`, boolean `dry_run`, integer `exit_code`, string `error`/`stderr`, boolean `warning`, and schema/command/comment/version/timestamp/host/run metadata. The name/title come from `script_name`, and job/command identify `rclone-multithreaded-upload`. Rclone-specific `event`, `failed_remotes`, per-remote stages/errors and detailed progress remain as extensions. Identity and version use the standard `name`, `job` and `version` fields. A successful report has `error: ""`.
 
 `completion.on_success=false` suppresses successful completion events while keeping failure reports; it has no effect on live preview. Completion events are non-retained. Live state is on its own topics, with retained discovery and a separate retained last result. Live preview observes a real job and does not enable a dry-run mode. MQTT transport failures preserve the rclone/cleanup exit code.
 
-See [MQTT.md](MQTT.md) for every config key, payload mappings, old `mqtt` config migration and HA notification setup. See [LIVE_PREVIEW.md](LIVE_PREVIEW.md) for live settings, stage-based progress and dashboard setup. The HA device name comes from `script_name`; with the example device ID the status entity is `sensor.job_live_rclone_multithreaded_upload_status`. Full JSON examples are in `payload-examples.json` and `live-payload-examples.json`.
+See [MQTT.md](MQTT.md) for every config key, payload mappings and HA notification setup. See [LIVE_PREVIEW.md](LIVE_PREVIEW.md) for live settings, stage-based progress and dashboard setup. The HA device name comes from `script_name`; with the example device ID the status entity is `sensor.job_live_rclone_multithreaded_upload_status`. The one `payload-examples.json` file groups a success packet and a failure packet; `live-payload-examples.json` contains one complete running live packet.
 
 ### `thread_limits`
 
@@ -534,7 +535,7 @@ For quota-managed uploads, source-selection filters are first applied to the fro
 
 ## Generated files and lock behavior
 
-The configured lock file prevents two normal instances using that lock path from running at once. The file contains the process PID and is removed on normal process exit through the registered cleanup handler, and also on handled SIGINT/SIGTERM.
+The configured lock file prevents two normal instances using that lock path from running at once. The file contains the job process PID and is removed when the job completes graceful finalization, including handled SIGINT/SIGTERM. Forced termination can leave the lock behind; verify that the old job and its children have stopped before manually removing that stale lock.
 
 Combined delete plans are written below `delete_list_dir` with names derived from the phase, delete mode, and a readable remote-name fragment plus the full SHA-256 of the original `remote_path`. The hash prevents legacy filename collisions such as `a:b/c` versus `a_b:c`. The generated delete lists are passed to `rclone delete --files-from`.
 
@@ -561,83 +562,35 @@ Final completion reporting is attempted after runtime success/failure, unexpecte
 
 `home-assistant-mqtt-automation.example.yaml` retains Pushover and persistent notifications and checks consistency of the template's status, boolean success and integer exit code. Replace `notify.pushover` with your configured action, or remove those actions. Match its exact topic to `completion.topic`. Pushover titles/messages use the supplied template's bounded formatting, with metadata and the latest stderr tail. If shortened, the message says so; the full completion payload and the persistent HA failure notification retain the complete report diagnostics.
 
-`home-assistant-live-dashboard.example.yaml` is an independent card for the live device. Progress counts settled detailed workflow steps across all destinations, with an independent step list and counts for each destination; byte totals and speed remain unknown. Set its entity IDs to match `live.device_id`. The live topics are separate from completion notifications.
+The live card counts settled workflow steps across every configured destination, with independent per-destination counts and current operations. Its topics and enable switch remain separate from completion notifications; byte totals/speed stay unknown.
 
-For a card that fills its fields and adds matching jobs automatically, paste `manufacturer-live-preview-card.yaml` as a manual Markdown card. Both it and the raw `manufacturer-live-preview-card.md` already select manufacturer `rclone-multithreaded-upload`. No entity IDs need to be edited. The live config defaults to the same manufacturer, including when upgrading an existing config that omits this new field. Run a configured job with live publishing and discovery enabled so HA receives the updated discovery definitions and full state attributes. The per-job device name still comes from `script_name`.
+For a card that fills its fields and adds matching jobs automatically, paste `manufacturer-live-preview-card.yaml` as a manual Markdown card. Its selector defaults to manufacturer `rclone-multithreaded-upload`. No entity IDs need to be edited. The live config defaults to the same manufacturer, including when upgrading an existing config that omits this new field. Run a configured job with live publishing and discovery enabled so HA receives the updated discovery definitions and full state attributes. The per-job device name still comes from `script_name`.
 
-## Project files
+## Included examples and HA setup
 
-```text
-rclone-multithreaded-upload.py
-rclone_multithreaded_upload/
-    __init__.py
-    cleanup.py
-    cli.py
-    commands.py
-    config.py
-    delete_plan.py
-    lock.py
-    main.py
-    models.py
-    mqtt.py
-    mqtt_status.py
-    ha_live_preview.py
-    reporting.py
-    output.py
-    phases.py
-    planning.py
-    progress.py
-    rclone_backend.py
-    remote_files.py
-    reservation.py
-    results.py
-    state.py
-    summary.py
-    targets.py
-    upload.py
-    utils.py
-    verification.py
-tests/
-    test_logic.py
-    test_integration_fake_rclone.py
-    test_mqtt_status.py
-    test_ha_live_preview.py
-    test_reporting_adapter.py
-    test_manufacturer_card.py
-    test_parallel_progress.py
-config.example.json
-rclone-cctv-config.example.json
-home-assistant-mqtt-automation.example.yaml
-home-assistant-live-dashboard.example.yaml
-manufacturer-live-preview-card.yaml
-asus-frigate-live-preview-card.yaml
-manufacturer-live-preview-card.md
-ha-discovery-examples.json
-MQTT.md
-LIVE_PREVIEW.md
-payload-examples.json
-live-payload-examples.json
-requirements-mqtt.txt
-requirements-test.txt
-README.md
-VERSIONING.md
-commented_code_map.md
-verification_report.txt
-TEMPLATE_COMPATIBILITY.md
-PARALLEL_PROGRESS.md
-parallel-progress-examples.json
-parallel-progress-preview.md
-SHA256SUMS
-RELEASE_MANIFEST.json
-AGENTS.md
-```
+| File | Purpose |
+| --- | --- |
+| `config.example.json` | Complete general config with all canonical options. |
+| `rclone-cctv-config.example.json` | Complete CCTV config with all canonical options. |
+| `payload-examples.json` | One file containing separate `success` and `failure` completion packets. Publish a selected object, not the outer grouping wrapper. |
+| `live-payload-examples.json` | One complete running live packet with independent OneDrive, GDrive and Mega progress. |
+| `home-assistant-mqtt-automation.example.yaml` | Success/failure notification automation. Set its topic and notify action. |
+| `manufacturer-live-preview-card.yaml` | The one dynamic live card; recognizes devices by manufacturer and fields by role. |
 
-The optional `asus-frigate-live-preview-card.yaml` is the same detailed card preset to manufacturer `rclone-multithreaded-upload-ubuntu-zfs-raid-import-test`, matching the custom configuration discussed with this project. Use the normal manufacturer card for the default script manufacturer. Upgrade both the application package and the card to receive and display detailed destination progress.
+JSON payload files are synthetic reference data, not runtime config. Only the two config examples are intended to be copied/edited into `config.json`.
 
-For internal function-by-function behavior, see `commented_code_map.md`. For release history, see `VERSIONING.md`.
+For the custom manufacturer `rclone-multithreaded-upload-ubuntu-zfs-raid-import-test`, edit the selector near the top of `manufacturer-live-preview-card.yaml` to the exact same value as `live.manufacturer`. No custom duplicate card or per-destination entity IDs are required. An already installed card with the matching selector continues to work.
 
-Each destination also exposes `cleanup_jobs`: an independent view of each configured cleanup path, with its own pre/post planning states and settled/total count (normally two planning steps). These are views of the same steps and are never counted again in the overall total. Actual deletion stays in the existing combined delete-plan operation. The card displays these per-path counts above the full destination step table.
+Adding/removing `upload_directories` config entries automatically changes the live table. Each entry's `name` supplies its destination label. Overall progress is the sum of their independent step plans, with Upload, Cleanup and Trash cleanup distinguished. Detailed cleanup-rule views share the same steps and are not counted twice.
 
-The live card puts overall run progress above a dynamic destination table. Each row shows that destination's current operation, settled/total steps, percentage and state. The run's activity summary counts all active operations, distinguishing Upload, Cleanup and Trash cleanup, as well as snapshots, quota planning, waiting and verification. The denominator is the sum of each destination's own config-derived plan, so differently configured destinations can have different totals.
+Application source, dependency lists, offline tests and the detailed MQTT/live/process guides are included. `commented_code_map.md` explains functions/commands; `VERSIONING.md` records release changes. `RELEASE_MANIFEST.json`, `SHA256SUMS` and `verification_report.txt` document package contents, integrity and test results.
 
-To show OneDrive, GDrive and Mega, configure three entries in `upload_directories`, with the corresponding `name` and your actual rclone `remote_path` for each. Add or remove entries there to change the live table; no card edits or fixed destination count are needed. Individual cleanup rules and complete step tables appear below the overview. See [PARALLEL_PROGRESS.md](PARALLEL_PROGRESS.md) and the rendered [three-destination preview](parallel-progress-preview.md).
+## Stopping a run
+
+Use the documented `python3 rclone-multithreaded-upload.py --config config.json` command. Normal Linux/POSIX runs automatically start a supervisor and an isolated job process group. In htop you will see the supervisor plus its job process and rclone/MQTT workers. No new config option or command flag is required.
+
+Ctrl-C (`SIGINT`), `kill PID` (`SIGTERM`), SIGHUP and SIGQUIT request cancellation. New work is blocked, queued destinations are cancelled and configured waits wake promptly. The stop signal goes to the owned group; on Linux remaining child processes are force-stopped after approximately 0.3 seconds so they cannot keep pipes or thread-pool shutdown blocked. The job gets up to five seconds overall for best-effort interrupted MQTT/HA reporting and lock release. A second stop signal to the supervisor forces immediate group termination.
+
+Killing either displayed app process is covered: if the job is killed, the supervisor removes its remaining children; if the supervisor is killed with `kill -9`, the job's pipe watchdog kills the isolated group. SIGKILL cannot run Python finalization, so final notifications and lock removal cannot be guaranteed in that case. The supervisor also removes lingering group members on normal exit. Unrelated processes and other runs are outside this group.
+
+See [PROCESS_LIFECYCLE.md](PROCESS_LIFECYCLE.md) for signal commands, exit codes, verification and scope. Workflow-step progress describes work that actually ran; stopping a transfer or deletion does not undo completed changes.

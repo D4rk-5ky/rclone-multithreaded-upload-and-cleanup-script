@@ -52,60 +52,31 @@ def validate_local_upload_path(upload: UploadDirectory) -> tuple[bool, str | Non
     return True, None
 
 
-def get_size_filter_options(upload: UploadDirectory) -> list[str]:
-    """Extract source-selection filters from copy_options for the local snapshot."""
-    extracted: list[str] = []
+def split_copy_options(upload: UploadDirectory) -> tuple[list[str], list[str]]:
+    """Partition source filters and transfer-only options without changing their order."""
+    filters, transfer = [], []
     options = upload.copy_options
     index = 0
     while index < len(options):
         option = options[index]
-        option_name = option.split("=", 1)[0]
-        if option_name in SOURCE_SELECTION_OPTIONS_BOOLEAN:
-            extracted.append(option)
+        name = option.split("=", 1)[0]
+        if name in SOURCE_SELECTION_OPTIONS_BOOLEAN:
+            filters.append(option)
             index += 1
-            continue
-        if option_name in SOURCE_SELECTION_OPTIONS_WITH_VALUE:
-            if "=" in option:
-                extracted.append(option)
-                index += 1
-                continue
-            if index + 1 >= len(options):
-                raise ValueError(
-                    f"Upload option {option_name} requires a value for local source selection"
-                )
-            extracted.extend([option, options[index + 1]])
-            index += 2
-            continue
-        index += 1
-    return extracted
-
-
-def get_non_filter_copy_options(upload: UploadDirectory) -> list[str]:
-    """Remove source-selection filters once an exact generated file list is used."""
-    retained: list[str] = []
-    options = upload.copy_options
-    index = 0
-    while index < len(options):
-        option = options[index]
-        option_name = option.split("=", 1)[0]
-        if option_name in SOURCE_SELECTION_OPTIONS_BOOLEAN:
+        elif name in SOURCE_SELECTION_OPTIONS_WITH_VALUE:
+            end = index + (1 if "=" in option else 2)
+            if end > len(options):
+                raise ValueError(f"Upload option {name} requires a value for local source selection")
+            filters.extend(options[index:end])
+            index = end
+        else:
+            transfer.append(option)
             index += 1
-            continue
-        if option_name in SOURCE_SELECTION_OPTIONS_WITH_VALUE:
-            if "=" in option:
-                index += 1
-            else:
-                if index + 1 >= len(options):
-                    raise ValueError(f"Upload option {option_name} requires a value")
-                index += 2
-            continue
-        retained.append(option)
-        index += 1
-    return retained
+    return filters, transfer
 
 
 def local_size_cache_key(upload: UploadDirectory) -> tuple[str, tuple[str, ...]]:
-    return str(Path(upload.local_path).resolve()), tuple(get_size_filter_options(upload))
+    return str(Path(upload.local_path).resolve()), tuple(split_copy_options(upload)[0])
 
 
 def _calculate_filtered_local_upload_snapshot(upload: UploadDirectory) -> LocalUploadSnapshot:
@@ -114,7 +85,7 @@ def _calculate_filtered_local_upload_snapshot(upload: UploadDirectory) -> LocalU
     if not valid:
         raise RuntimeError(error or "Invalid local path")
 
-    filter_options = get_size_filter_options(upload)
+    filter_options, _ = split_copy_options(upload)
     command = [
         "rclone",
         "lsjson",
@@ -208,7 +179,7 @@ def get_filtered_local_upload_snapshot(
         print_job_block("UPLOAD SOURCE JOB", job_number, upload.remote_path, detail)
         return None
 
-    filter_options = get_size_filter_options(upload)
+    filter_options, _ = split_copy_options(upload)
     print_job_block(
         "UPLOAD SOURCE JOB",
         job_number,
@@ -221,17 +192,6 @@ def get_filtered_local_upload_snapshot(
         ),
     )
     return snapshot
-
-
-def get_filtered_local_upload_size(
-    job_number: int,
-    upload: UploadDirectory,
-) -> tuple[int, int] | None:
-    """Compatibility helper returning bytes/count from the cached exact source snapshot."""
-    snapshot = get_filtered_local_upload_snapshot(job_number, upload)
-    if snapshot is None:
-        return None
-    return snapshot.total_bytes, snapshot.file_count
 
 
 def newest_first_local_files(files: tuple[LocalUploadFile, ...]) -> list[LocalUploadFile]:

@@ -64,7 +64,8 @@ class CardTests(unittest.TestCase):
             return bool(value) if value is not None else default
         self.env.filters['bool'] = ha_bool
         self.ha = FakeHA()
-        self.content = (Path(__file__).resolve().parents[1] / 'manufacturer-live-preview-card.md').read_text()
+        self.card = yaml.safe_load((Path(__file__).resolve().parents[1] / 'manufacturer-live-preview-card.yaml').read_text())
+        self.content = self.card['content']
 
     def state(self, outcome='running', run_id='current', unknown=False):
         live = h.LivePreview(h.LiveConfig(), name='NAS backup', job='backup', run_id=run_id)
@@ -123,10 +124,12 @@ class CardTests(unittest.TestCase):
             device_attr=self.ha.device_attr, device_entities=self.ha.device_entities,
             as_datetime=as_datetime, as_local=lambda value: value.astimezone(timezone.utc)))
 
-    def test_yaml_wrapper_preserves_markdown_content(self):
-        card = yaml.safe_load((Path(__file__).resolve().parents[1] / 'manufacturer-live-preview-card.yaml').read_text())
-        self.assertEqual(card['type'], 'markdown')
-        self.assertEqual(card['content'], self.content)
+    def test_yaml_card_contains_complete_manufacturer_template(self):
+        self.assertEqual(self.card['type'], 'markdown')
+        self.assertIn("{% set manufacturer = 'rclone-multithreaded-upload' %}", self.content)
+        self.assertIn("live_preview_role", self.content)
+        self.assertIn('| Destination | Activity / current step | Settled steps | Progress | State |', self.content)
+        self.env.parse(self.content)
 
     def test_manufacturer_filter_and_custom_name(self):
         self.add('one', name='Custom manufacturer job', live=self.state(), manufacturer='My Backup Jobs')

@@ -134,8 +134,7 @@ def build_report(
 def encode_report(report: Mapping[str, Any]) -> str:
     """Validate and serialize a template report as compact UTF-8 JSON.
 
-    This validates this module's contract, not every historical Syncerate payload.
-    Build legacy adapters through build_report rather than publishing unchecked JSON.
+    Use build_report to construct packets with the required fields before publishing.
     """
     if not isinstance(report, Mapping):
         raise ValueError("report must be an object")
@@ -158,15 +157,6 @@ def encode_report(report: Mapping[str, Any]) -> str:
         if key in report and (not isinstance(report[key], list) or any(not isinstance(x, dict) for x in report[key])):
             raise ValueError(f"{key} must be an array of objects")
     return _json_text(report)
-
-
-def build_mqtt_status_payload(**kwargs: Any) -> str:
-    """Convenience JSON-string builder; uses build_report's arguments.
-
-    The name follows Syncerate, but the signature is intentionally independent
-    of Syncerate AppConfig/ReplicationSummary and is not a drop-in function replacement.
-    """
-    return encode_report(build_report(**kwargs))
 
 
 @dataclass(frozen=True)

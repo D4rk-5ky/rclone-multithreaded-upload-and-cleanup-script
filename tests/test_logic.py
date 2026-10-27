@@ -14,9 +14,9 @@ from unittest.mock import patch
 from rclone_multithreaded_upload.cleanup import cleanup_one_trash_remote
 from rclone_multithreaded_upload.config import load_config
 from rclone_multithreaded_upload.delete_plan import execute_delete_plan
+from rclone_multithreaded_upload.mqtt_status import MQTTConfig
 from rclone_multithreaded_upload.models import (
     CleanupTarget,
-    MqttConfig,
     DirectoryCleanupRule,
     RemoteDeletePlan,
     RemoteFile,
@@ -29,15 +29,13 @@ from rclone_multithreaded_upload.models import (
 from rclone_multithreaded_upload.mqtt import (
     build_result_payload,
     publish_final_result,
-    publish_result_payload,
 )
 from rclone_multithreaded_upload.planning import build_pre_upload_plan
 from rclone_multithreaded_upload.remote_files import get_managed_snapshot_files
 from rclone_multithreaded_upload.reservation import (
     clear_local_size_cache,
-    get_filtered_local_upload_size,
     get_filtered_local_upload_snapshot,
-    get_size_filter_options,
+    split_copy_options,
     select_local_upload_files,
 )
 from rclone_multithreaded_upload.results import (
@@ -57,7 +55,7 @@ class StateSnapshot:
     def __enter__(self):
         self.values = {
             "script_name": STATE.script_name,
-            "mqtt": STATE.mqtt,
+            "completion": STATE.completion,
             "live_config": STATE.live_config,
             "live_preview": STATE.live_preview,
             "run_id": STATE.run_id,
@@ -76,7 +74,6 @@ class StateSnapshot:
             "sleep_after_step": STATE.sleep_after_step,
             "reservation_safety_headroom_bytes": STATE.reservation_safety_headroom_bytes,
             "lock_created": STATE.lock_created,
-            "reserved_upload_bytes": dict(STATE.reserved_upload_bytes),
             "planned_upload_files": dict(STATE.planned_upload_files),
             "run_results": dict(STATE.run_results),
         }
@@ -229,7 +226,7 @@ class ConfigValidationTests(unittest.TestCase):
         result = self.run_validate_config(
             {
                 "script_name": "Frigate CCTV Upload",
-                "mqtt": {
+                "completion": {
                     "enabled": True,
                     "host": "192.0.2.10",
                     "port": 1883,
@@ -237,7 +234,6 @@ class ConfigValidationTests(unittest.TestCase):
                     "username": "rclone",
                     "password": "super-secret",
                     "qos": 1,
-                    "retain": False,
                 },
                 "upload_directories": [self.minimal_upload()],
             }
@@ -252,22 +248,22 @@ class ConfigValidationTests(unittest.TestCase):
     def test_mqtt_enabled_requires_host(self):
         result = self.run_validate_config(
             {
-                "mqtt": {"enabled": True},
+                "completion": {"enabled": True},
                 "upload_directories": [self.minimal_upload()],
             }
         )
         self.assertEqual(result.returncode, 1, result.stdout)
-        self.assertIn("mqtt.host must be a nonempty string", result.stdout)
+        self.assertIn("completion.host must be a nonempty string", result.stdout)
 
     def test_mqtt_qos_is_validated(self):
         result = self.run_validate_config(
             {
-                "mqtt": {"enabled": True, "host": "broker", "qos": 3},
+                "completion": {"enabled": True, "host": "broker", "qos": 3},
                 "upload_directories": [self.minimal_upload()],
             }
         )
         self.assertEqual(result.returncode, 1, result.stdout)
-        self.assertIn("mqtt.qos must be 0, 1 or 2", result.stdout)
+        self.assertIn("completion.qos must be 0, 1 or 2", result.stdout)
 
     def test_script_name_and_publish_topic_reject_null_or_wildcards(self):
         null_name = self.run_validate_config(
@@ -281,16 +277,16 @@ class ConfigValidationTests(unittest.TestCase):
 
         null_topic = self.run_validate_config(
             {
-                "mqtt": {"enabled": True, "host": "broker", "topic": None},
+                "completion": {"enabled": True, "host": "broker", "topic": None},
                 "upload_directories": [self.minimal_upload()],
             }
         )
         self.assertEqual(null_topic.returncode, 1, null_topic.stdout)
-        self.assertIn("mqtt.topic must be a nonempty string", null_topic.stdout)
+        self.assertIn("completion.topic must be a nonempty string", null_topic.stdout)
 
         wildcard_topic = self.run_validate_config(
             {
-                "mqtt": {
+                "completion": {
                     "enabled": True,
                     "host": "broker",
                     "topic": "homeassistant/rclone/#",
@@ -300,6 +296,23 @@ class ConfigValidationTests(unittest.TestCase):
         )
         self.assertEqual(wildcard_topic.returncode, 1, wildcard_topic.stdout)
         self.assertIn("without wildcards", wildcard_topic.stdout)
+
+    def test_unknown_options_and_removed_sections_are_rejected_before_work(self):
+        upload = self.minimal_upload()
+        cases = [
+            ({'mqtt': {'enabled': True, 'host': 'broker'}}, 'root: unknown option(s): mqtt'),
+            ({'completion': {}, 'mqtt': {}}, 'root: unknown option(s): mqtt'),
+            ({'directory_cleanup_rules': []}, 'root: unknown option(s): directory_cleanup_rules'),
+            ({'uplod_threads': 3}, 'root: unknown option(s): uplod_threads'),
+            ({'thread_limits': {'upload_thread': 3}}, 'thread_limits: unknown option(s): upload_thread'),
+            ({'upload_directories': [dict(upload, max_total_sze='2G')]}, 'unknown option(s): max_total_sze'),
+            ({'upload_directories': [dict(upload, cleanup_rules=[{'path':'/', 'max_file':3}])]}, 'unknown option(s): max_file'),
+        ]
+        for settings, message in cases:
+            with self.subTest(settings=settings):
+                result = self.run_validate_config({'upload_directories': [upload], **settings})
+                self.assertEqual(result.returncode, 1, result.stdout)
+                self.assertIn(message, result.stdout)
 
 
 class MqttResultTests(unittest.TestCase):
@@ -327,7 +340,8 @@ class MqttResultTests(unittest.TestCase):
             payload = build_result_payload(0)
 
             self.assertEqual(payload["schema_version"], 1)
-            self.assertEqual(payload["script_name"], "Frigate CCTV Upload")
+            self.assertEqual(payload["name"], "Frigate CCTV Upload")
+            self.assertTrue({"script_name", "application", "application_version"}.isdisjoint(payload))
             self.assertEqual(payload["status"], "success")
             self.assertTrue(payload["success"])
             self.assertEqual(payload["exit_code"], 0)
@@ -362,7 +376,7 @@ class MqttResultTests(unittest.TestCase):
 
     def test_disabled_mqtt_does_not_load_optional_dependency(self):
         with StateSnapshot():
-            STATE.mqtt = MqttConfig(enabled=False)
+            STATE.completion = MQTTConfig(enabled=False)
             with patch("rclone_multithreaded_upload.mqtt.publish_report") as loader:
                 self.assertIsNone(publish_final_result(0))
                 loader.assert_not_called()
@@ -370,7 +384,7 @@ class MqttResultTests(unittest.TestCase):
     def test_publish_failure_is_reported_but_does_not_raise(self):
         from rclone_multithreaded_upload.mqtt_status import PublishResult
         with StateSnapshot():
-            STATE.mqtt = MqttConfig(enabled=True, host="mqtt.local")
+            STATE.completion = MQTTConfig(enabled=True, host="mqtt.local")
             self._initialize_results()
             with patch("rclone_multithreaded_upload.mqtt.publish_report",
                        return_value=PublishResult("failed", "Publisher failed")):
@@ -413,7 +427,7 @@ class LogicTests(unittest.TestCase):
         self.assertNotIn("/", first)
         self.assertLessEqual(len(first), 145)
 
-    def test_size_filter_options_only_copy_source_selection_filters(self):
+    def test_copy_options_partition_preserves_filters_and_transfer_options(self):
         upload = UploadDirectory(
             local_path="/tmp/source",
             remote_path="remote:path",
@@ -425,12 +439,16 @@ class LogicTests(unittest.TestCase):
             cleanup_rules=[],
         )
         self.assertEqual(
-            get_size_filter_options(upload),
+            split_copy_options(upload)[0],
             [
                 "--max-age", "12h", "--exclude", "/Home/OldCamera/**",
                 "--ignore-case", "--include=*.mp4",
             ],
         )
+        self.assertEqual(split_copy_options(upload)[1], ['--stats', '10s', '--stats-one-line', '--transfers', '4'])
+        upload.copy_options = ['--exclude']
+        with self.assertRaisesRegex(ValueError, 'requires a value'):
+            split_copy_options(upload)
 
     def test_managed_snapshot_union_deduplicates_overlapping_rules(self):
         upload = UploadDirectory(
@@ -530,11 +548,11 @@ class LogicTests(unittest.TestCase):
             ):
                 with ThreadPoolExecutor(max_workers=3) as executor:
                     results = list(executor.map(
-                        lambda item: get_filtered_local_upload_size(item[0], item[1]),
+                        lambda item: get_filtered_local_upload_snapshot(item[0], item[1]),
                         enumerate(uploads, start=1),
                     ))
 
-            self.assertEqual(results, [(123, 4), (123, 4), (123, 4)])
+            self.assertEqual([(value.total_bytes, value.file_count) for value in results], [(123, 4)] * 3)
             self.assertEqual(len(calls), 1)
 
     def test_combined_delete_plan_uses_one_delete_for_one_mode(self):
@@ -731,7 +749,6 @@ class LogicTests(unittest.TestCase):
             )
             STATE.upload_directories = [upload]
             STATE.delete_list_dir = Path(temp_dir) / "lists"
-            STATE.reserved_upload_bytes = {remote_path: 1234}
             STATE.planned_upload_files = {
                 remote_path: ("recordings/newest.mp4", "clips/event.webp")
             }
@@ -1085,8 +1102,8 @@ class LogicTests(unittest.TestCase):
         with StateSnapshot():
             load_config(str(project_root / "config.example.json"))
             self.assertEqual(STATE.script_name, "Camera archive upload")
-            self.assertFalse(STATE.mqtt.enabled)
-            self.assertEqual(STATE.mqtt.topic, "homeassistant/rclone-upload/result")
+            self.assertFalse(STATE.completion.enabled)
+            self.assertEqual(STATE.completion.topic, "homeassistant/rclone-upload/result")
             self.assertEqual(STATE.upload_threads, 2)
             self.assertEqual(STATE.cleanup_threads, 2)
             self.assertEqual(STATE.remote_quota_cleanup_threads, 2)

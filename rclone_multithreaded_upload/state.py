@@ -10,16 +10,17 @@ from pathlib import Path
 import threading
 import uuid
 
+from .mqtt_status import MQTTConfig
 from . import APPLICATION_NAME
 from .ha_live_preview import LiveConfig, LivePreview
 
-from .models import MqttConfig, RemoteRunResult, UploadDirectory
+from .models import RemoteRunResult, UploadDirectory
 
 
 @dataclass
 class RuntimeState:
     script_name: str = "rclone-multithreaded-upload"
-    mqtt: MqttConfig = field(default_factory=MqttConfig)
+    completion: MQTTConfig = field(default_factory=MQTTConfig)
     live_config: LiveConfig = field(default_factory=lambda: LiveConfig(manufacturer=APPLICATION_NAME))
     live_preview: LivePreview | None = field(default=None, repr=False)
     run_id: str = field(default_factory=lambda: str(uuid.uuid4()))
@@ -39,9 +40,8 @@ class RuntimeState:
     sleep_after_step: int = 5
     reservation_safety_headroom_bytes: int = 1 * 1024**2
     lock_created: bool = False
-    reserved_upload_bytes: dict[str, int] = field(default_factory=dict)
     planned_upload_files: dict[str, tuple[str, ...]] = field(default_factory=dict)
-    reserved_upload_bytes_lock: threading.Lock = field(
+    planned_upload_files_lock: threading.Lock = field(
         default_factory=threading.Lock,
         repr=False,
     )

@@ -14,7 +14,7 @@ JOB = APPLICATION_NAME
 
 def sanitize(text: str) -> str:
     """Remove configured MQTT passwords and common credential flags from reports."""
-    for secret in (STATE.mqtt.password, STATE.live_config.password):
+    for secret in (STATE.completion.password, STATE.live_config.password):
         if secret:
             text = text.replace(secret, "[redacted]")
     return re.sub(
@@ -73,7 +73,7 @@ def update_live(**values) -> None:
             print_error("HA live preview update failed; continuing the rclone job")
 
 
-def refresh_live(current_item: str | None = None) -> None:
+def refresh_live(*, clear_current: bool = False) -> None:
     """Count settled remote stages, and classify each remote from actual results.
 
     Holding the adapter lock across snapshot/update prevents concurrent workers
@@ -105,7 +105,7 @@ def refresh_live(current_item: str | None = None) -> None:
             active = [row["name"] + ": " + ", ".join(row["active_steps"]) for row in details["remote_jobs"] if row["running"]]
             values = {"completed": details["completed"], "total": total, "details": details, **groups,
                       "current_item": "; ".join(active) if active else ("Waiting for the next phase" if details["completed"] < total else "")}
-            if current_item == "":
+            if clear_current:
                 values["current_item"] = ""
             STATE.live_preview.update(**values)
     except Exception:
@@ -116,7 +116,7 @@ def finish_live(exit_code: int, *, error: str, interrupted: bool, warning: bool 
     if STATE.live_preview is None:
         return
     try:
-        refresh_live("")
+        refresh_live(clear_current=True)
         STATE.live_preview.finish(exit_code, error=error, stderr=STATE.stderr_tail,
                                   interrupted=interrupted, warning=warning)
     except Exception:

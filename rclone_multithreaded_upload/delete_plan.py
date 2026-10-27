@@ -1,7 +1,6 @@
 """Combined remote delete planning and execution."""
 
 from collections import defaultdict
-from pathlib import Path
 
 from .progress import observe_step, skip_step
 from .commands import run_command

@@ -1,96 +1,113 @@
-Verification report — rclone-multithreaded-upload 0.0.32
+Verification report — rclone-multithreaded-upload 0.0.35
 Date: 2026-10-27 (Europe/Copenhagen)
 
-Inputs and workflow
-- Original supplied project: rclone-multithreaded-upload-and-cleanup-script-main.zip, application 0.0.26.
-- Previous release: rclone-multithreaded-upload-and-cleanup-script-0.0.31.zip, application 0.0.31.
-- Inspected project source/config/docs/tests and phase/safety behavior before editing.
-- Version increments exactly 0.0.1; rollover remains 0.0.99 -> 0.1.0.
-- No original or previous-release files removed.
+Scope and version
+Owner-requested removal of old config/function compatibility and redundant code.
+Version increments exactly 0.0.1 from 0.0.34; earlier delivered ZIPs and
+source trees are untouched. Inspected complete source/config/docs/tests before edits.
+Every required project path remains; no file was added or removed in this version.
 
-Changes in this release
-- Added readable activity/count metadata derived from RUNNING observations in the
-  existing locked snapshot, independently per destination and summed for the run.
-- Upload, Cleanup and Trash cleanup are distinct, with Snapshot, Quota planning,
-  Waiting and Verification also identified. Idle/finished states clear active counts.
-- Added compact dynamic destination overview table beneath overall run progress:
-  configured name, activity/current step, independent settled/total, percentage,
-  state and existing-failure marker. Existing full details remain beneath the table.
-- Table rows follow configured destinations without a fixed count or hardcoded names.
-  New top phase text summarizes all currently active categories across destinations.
-- Preserved manufacturer/role discovery, renamed-entity support and old-payload
-  fallback. Default and custom ASUS manufacturer cards share the same template.
-- Updated current usage/docs/code map/history. Synthetic examples now use OneDrive,
-  GDrive and Mega with different denominators (7, 12, 16; sum 35) and running uploads
-  at 14/35 overall. A separate example shows upload/cleanup/trash categories together.
-- No new config options; both complete config examples and the exact owner disclaimer
-  remain intact. Completion/live remain independently configured.
+Breaking changes and removals
+- Only completion/live reporting config sections are supported. The root mqtt
+  translator, publish_timeout/keepalive/retain/tls_insecure handling, null/string
+  normalization and historical topic/QoS defaults were removed. Unsupported keys
+  now fail validation; use the complete current examples and completion.timeout.
+- Canonical parse_completion_config/MQTTConfig and internal STATE.completion replace
+  parse_mqtt_config/MqttConfig/STATE.mqtt. The unused app __version__ alias is gone.
+- Removed get_upload_remote_quota_entries, RemoteQuotaFile,
+  get_filtered_local_upload_size, join_relative_path, build_mqtt_status_payload,
+  unused sleep_after_step and one-line publish_result_payload.
+- Removed cleanup.py's obsolete execute_delete_plan re-export/__all__ and unused
+  imports. Current callers import the implementation from delete_plan.py directly.
+- Removed an unread reservation-byte cache. The planned upload list and its lock
+  remain; actual quota arithmetic, reservations and displayed values are preserved.
+- Removed the ignored positional refresh_live argument; finish uses clear_current.
+- Completion uses standard name/job/version rather than duplicate script_name/
+  application/application_version fields. All standard fields, event, failed_remotes,
+  remotes/stages/errors and progress remain. HA automation uses standard fields.
 
-Compile, CLI, schema, card and safety checks
+Deduplication and safety
+One shared unknown-key validator covers reporting, root, thread, upload and cleanup
+rule settings. One option partitioner replaces the two near-identical source/transfer
+scanners, preserving order and values. Current code uses real implementations rather
+than compatibility wrappers. Actual backend wrappers (crypt/alias/etc), deletion
+modes, age/size/count checks, source selection, exact upload lists, quotas, locking,
+barriers, failure isolation and signal supervision remain intact.
+
+Before/after code count
+runtime_python: files 29 -> 29, physical lines 4,703 -> 4,550, code lines 3,876 -> 3,756, functions 173 -> 166.
+test_python: files 8 -> 8, physical lines 3,501 -> 3,517, code lines 3,143 -> 3,158, functions 227 -> 228.
+total_python: files 37 -> 37, physical lines 8,204 -> 8,067, code lines 7,019 -> 6,914, functions 400 -> 394.
+ha_yaml: 2 files, 339 -> 339 physical lines (unchanged).
+All code files (Python including tests + HA YAML):
+  39 -> 39 files;
+  8,543 -> 8,406 physical lines.
+
+Method: Physical lines use splitlines() for every shipped .py file. Code lines are token-bearing, nonblank physical lines excluding comment-only and AST docstring-only lines; multiline non-docstring fixture strings are counted. Runtime and tests are disjoint. Docs, configs and payload JSON are not Python code. HA YAML physical/nonblank/noncomment lines are reported separately.
+Runtime code lines fell by 120; tests grew by
+15 code lines for canonical/rejection checks, giving a net reduction of
+105 Python code lines. Physical Python lines fell by
+137. No minification, test dropping or doc/comment removal was used
+to inflate this metric. Complete count data is also in RELEASE_MANIFEST.json.
+
+Compile, CLI, config, schema and safety verification
 All Python source/tests compile and parse as Python 3.10 syntax.
-Code map covers all 366 explicit functions/methods, including nested helpers.
+Code map covers all 394 explicit functions/methods, including nested helpers.
 config.example.json: all canonical fields present; actual validation exits 0 and prints overall/per-destination step totals.
 rclone-cctv-config.example.json: all canonical fields present; actual validation exits 0 and prints overall/per-destination step totals.
 CLI --help: expected exit 0.
 CLI --version: expected exit 0.
 CLI (no args): expected exit 2.
 CLI --unknown: expected exit 2.
-HA YAML/Jinja syntax parses; raw/default card content matches and custom card uses the exact user manufacturer (without the extra trailing t).
-Generated examples validate: 7/12/16 step denominators sum to 35, with three simultaneous uploads at 14/35 settled and consistent failed/final states.
-Live template changes are exactly the additive details field/validation/docs; completion template and HA success/failure automation remain byte-identical to v0.0.30.
+Exactly one success/failure file and one live packet file validate against real adapters; live 7/12/16-step destinations sum to 35 (14 settled).
+The retained YAML renders the supplied live packet, renamed entities and custom manufacturer with only its selector changed.
+Lean example inventory and current documentation links/references verified; no redundant examples reintroduced.
+Live template retains exactly the existing details extension; HA success/failure automation remains byte-identical to v0.0.30. Completion standard behavior is checked separately after removal of the unused builder.
 Owner disclaimer preserved verbatim.
-Observer-stripped original operation ASTs match for phases.py, planning.py, reservation.py, upload.py, cleanup.py, delete_plan.py, verification.py.
-Configuration, command runner, locks, backend/file listing, state, targets, utilities and completion template remain byte-identical.
-All application Python modules except version and progress metadata are byte-identical to 0.0.31; HA completion automation is also byte-identical.
+Process supervision, quota planning, verification, backend resolution, target building, live template, command subprocess runner and CLI modules are byte-identical to 0.0.34. Both canonical configs and HA YAML files are byte-identical.
+All delete-plan/trash functions are AST-identical after removing a re-export and unused imports. Phase ASTs match after removing the unread reservation map writes/clear and normalizing its lock rename. Barriers, safety eligibility, snapshots and rclone arguments match.
+The single option partitioner matches both former helpers on 5,000 seeded cases (4133 valid, 867 missing-value rejections). No current source-selection/transfer behavior changed.
+Completion module AST is identical apart from the deleted unused convenience builder and docstring text; typed JSON validation, config validation and publishing worker behavior are preserved.
+Deleted APIs, aliases and write-only cache are absent; completion examples use only standard identity/version fields.
 
-Offline tests
-Environment: Python 3.14.4 (main, Aug 20 2026, 10:41:58) [GCC 15.2.0] on Linux.
-Command from project root:
+Offline test command from project root:
   PYTHONDONTWRITEBYTECODE=1 python3 -B -m unittest discover -s tests -v
-Result: 145 tests passed in 18.303 seconds (OK), no skipped tests.
+Environment: Python 3.14.4 (main, Aug 20 2026, 10:41:58) [GCC 15.2.0] on Linux.
+Result: 157 passed in 31.041 seconds, no skipped tests.
 
-Four added tests cover mixed active categories and overview order; reinitialization
-for one, two, three, four and back to two destinations with exact table rows and
-summed denominators; clearing stale active labels at finish; older payloads and
-escaping configured names containing a pipe, HTML and newline. Existing three-worker
-upload/trash tests now use OneDrive/GDrive/Mega labels and check the new activity
-counts and compact overview as actual observed operations are held open.
+Tests now exercise canonical completion config/APIs and directly use exact source
+snapshots instead of deleted aggregate wrappers. Existing cache-single-flight
+assertions remain. New actual-CLI rejection checks cover obsolete root sections and
+unknown root/thread/upload/cleanup keys. Completion rejection checks include old
+publish_timeout/keepalive/retain/tls_insecure options. All safety/concurrency/
+shutdown/fake-rclone/MQTT/HA coverage remains; no tests were removed. Option partition
+checks cover both selected filters and retained transfer options, plus missing values.
 
-The full suite also covers worker concurrency, failure isolation, interruption,
-monotonic counts, independent stderr, per-cleanup-rule views without double counting,
-shared source-cache acquisition, no-op steps, monitor failures, actual entrypoint
-success and partial failure using fake rclone and real publisher worker subprocesses
-with fake Paho, stage barriers, source selection/quotas/delete modes/locks, typed
-success/failure JSON, bounded notifications and manufacturer card discovery.
+A separate deterministic equivalence audit compares the single partitioner against
+both prior helper functions on 5,000 generated cases: 4,133 valid results match and
+867 missing-value cases are rejected by both. Safety AST/byte comparisons described
+above validate the untouched operation/transport implementations.
 
-Safety evidence
-All Python application files except __init__.py (version) and progress.py (derived
-activity metadata) are byte-identical to 0.0.31. Thus operation functions, rclone
-commands, stage barriers, eligibility checks, locking, config parsing, report adapter,
-live/completion modules, background publisher and final-outcome logic are unchanged.
-HA completion automation is also byte-identical. The earlier observer-stripped AST
-comparison against 0.0.30 still passes for all seven instrumented operation modules.
+Documentation/examples
+README explains only current usage/keys and required public flags. Complete code map
+covers all 394 explicit functions/methods including nested helpers. VERSIONING records
+the breaking cleanup; the owner's exact disclaimer is preserved. Both full config
+examples remain byte-identical. The one success/failure packet file and one live
+packet file are regenerated from real adapters using synthetic data with no commands
+or broker I/O. The live example still shows three independent destinations at 14/35
+steps. Both retained HA YAML files are byte-identical to the previous release.
 
 Package verification
-- Original paths retained: 36/36, zero missing.
-- Previous-release paths retained: 61/61, zero missing.
-- Intended file count: 61. ZIP membership matches saved release files and
-  RELEASE_MANIFEST.json; every archived byte matches its source file.
-- Verified ZIP CRC, SHA256SUMS (all files except itself), sibling archive SHA256 and
-  executable entry mode. No bytecode, build caches, temporary files or logs included.
-- Standalone custom-card output matches the included ASUS manufacturer card.
+- Original retained: 36/36, zero unexpected missing paths.
+- Previous retained: 56/56, zero missing/added paths.
+- ZIP membership equals saved release files and RELEASE_MANIFEST.json exactly.
+- Every archived byte, ZIP CRC, per-file SHA256SUMS except itself, sibling archive
+  SHA256 and executable entry mode are verified. No bytecode, caches, temporary
+  files, test logs or work scripts included.
 
-Limits and usage
-- No real MQTT broker, HA instance, Pushover, TLS endpoint, cloud provider or real
-  upload/move/deletion was exercised. Integration uses offline fakes and fixture data.
-- Python 3.10 syntax checked; runtime tests used Python 3.14.4 on Linux.
-- Counts measure settled logical workflow steps (including failures/skips), not
-  transferred bytes or elapsed-time estimates. A long upload remains one active step.
-  Final 100% does not mean success; explicit outcomes/errors remain authoritative.
-- MQTT can coalesce fast changes; full step states/timestamps remain in details.
-  Existing scheduling limits/barriers still determine which work may overlap.
-- Install the new application and update the HA Markdown card. Set each config
-  upload_directories entry's name for destination labels. Add/remove entries there
-  to change rows; the card requires no entity IDs or fixed destination list.
-- The ASUS card matches exactly the custom live.manufacturer previously supplied:
-  rclone-multithreaded-upload-ubuntu-zfs-raid-import-test. No credentials copied.
+Limits
+No real broker, HA instance, Pushover, TLS endpoint or production cloud upload/move/
+deletion was exercised. Runtime tests used Python 3.14.4 on Linux; Python 3.10 syntax
+was checked. Other platforms/frozen builds were not exercised. Current operational
+limits (force-kill notifications/stale locks, logical progress rather than transfer
+bytes, etc.) remain documented in PROCESS_LIFECYCLE.md and LIVE_PREVIEW.md.

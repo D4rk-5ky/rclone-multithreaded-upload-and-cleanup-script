@@ -8,7 +8,7 @@ from .reporting import append_diagnostics
 from .models import UploadDirectory
 from .output import OUTPUT_LOCK, OUTPUT_SEPARATOR, print_job_block
 from .rclone_backend import get_delete_mode_options
-from .reservation import get_non_filter_copy_options, validate_local_upload_path
+from .reservation import split_copy_options, validate_local_upload_path
 from .results import (
     command_error_summary,
     record_stage_failure,
@@ -16,6 +16,7 @@ from .results import (
     record_upload_trash_mode_attempted,
 )
 from .state import STATE
+from .process_lifecycle import check_cancelled
 from .utils import remote_name_from_path, validate_upload_command
 
 
@@ -51,6 +52,7 @@ def run_command_streamed(
         print(OUTPUT_SEPARATOR)
         print(flush=True)
 
+    check_cancelled()
     process = subprocess.Popen(
         command,
         stdout=subprocess.PIPE,
@@ -74,7 +76,6 @@ def get_upload_buffer_options(upload: UploadDirectory) -> list[str]:
     if upload.buffer_size is None:
         return []
     return ["--buffer-size", upload.buffer_size]
-
 
 
 def write_planned_upload_file_list(
@@ -110,7 +111,7 @@ def upload_one_directory(job_number: int, upload: UploadDirectory) -> bool:
         print_job_block("UPLOAD JOB", job_number, upload.remote_path, detail)
         return False
 
-    with STATE.reserved_upload_bytes_lock:
+    with STATE.planned_upload_files_lock:
         planned_files = STATE.planned_upload_files.get(upload.remote_path)
 
     if planned_files is not None and not planned_files:
@@ -137,7 +138,7 @@ def upload_one_directory(job_number: int, upload: UploadDirectory) -> bool:
     if planned_files is not None:
         try:
             upload_list_path = write_planned_upload_file_list(upload, planned_files)
-            copy_options = get_non_filter_copy_options(upload)
+            _, copy_options = split_copy_options(upload)
             file_list_options = ["--files-from0", str(upload_list_path)]
         except (OSError, UnicodeError, ValueError) as error:
             detail = f"Failed preparing exact upload file list: {error}"

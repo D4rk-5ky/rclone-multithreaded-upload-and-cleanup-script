@@ -10,10 +10,11 @@ import unittest
 from unittest.mock import patch
 
 from test_logic import StateSnapshot
-from rclone_multithreaded_upload.config import load_config, parse_live_config, parse_mqtt_config
+from rclone_multithreaded_upload.config import load_config, parse_live_config, parse_completion_config
 from rclone_multithreaded_upload.ha_live_preview import LiveConfig, LivePreview
 from rclone_multithreaded_upload.lock import signal_handler
-from rclone_multithreaded_upload.models import MqttConfig, UploadDirectory
+from rclone_multithreaded_upload.mqtt_status import MQTTConfig
+from rclone_multithreaded_upload.models import UploadDirectory
 from rclone_multithreaded_upload.mqtt import build_result_payload
 from rclone_multithreaded_upload.mqtt_status import PublishResult, encode_report
 from rclone_multithreaded_upload.reporting import append_diagnostics
@@ -30,15 +31,15 @@ class ConfigTests(unittest.TestCase):
         for name in ('config.example.json', 'rclone-cctv-config.example.json'):
             with self.subTest(name=name), StateSnapshot():
                 load_config(str(root / name))
-                self.assertIsInstance(STATE.mqtt, MqttConfig)
+                self.assertIsInstance(STATE.completion, MQTTConfig)
                 self.assertIsInstance(STATE.live_config, LiveConfig)
-                self.assertFalse(STATE.mqtt.enabled)
+                self.assertFalse(STATE.completion.enabled)
                 self.assertFalse(STATE.live_config.enabled)
                 self.assertEqual(STATE.live_config.device_id, 'rclone_multithreaded_upload')
                 self.assertEqual(STATE.live_config.manufacturer, 'rclone-multithreaded-upload')
 
     def test_tls_paths_resolve_beside_config_and_password_repr_is_private(self):
-        result = parse_mqtt_config({'completion': {'tls': True, 'ca_certs': 'tls/ca.pem',
+        result = parse_completion_config({'completion': {'tls': True, 'ca_certs': 'tls/ca.pem',
                                    'username': 'user', 'password': 'secret'}}, Path('/tmp/configdir'))
         live = parse_live_config({'live': {'tls': True, 'ca_certs': 'ca.pem'}}, Path('/tmp/configdir/job.json'))
         self.assertEqual(result.ca_certs, '/tmp/configdir/tls/ca.pem')
@@ -59,20 +60,18 @@ class ConfigTests(unittest.TestCase):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 parse_live_config({'live': {'manufacturer': value}}, Path('/tmp/config.json'))
 
-    def test_legacy_mqtt_translation(self):
-        result = parse_mqtt_config({'mqtt': {'enabled': True, 'host': 'broker', 'client_id': None,
-                                  'publish_timeout': 7, 'keepalive': 20, 'retain': False, 'tls_insecure': False}})
+    def test_current_completion_config_uses_template_defaults_and_timeout(self):
+        result = parse_completion_config({'completion': {'enabled': True, 'host': 'broker', 'timeout': 7}})
         self.assertEqual(result.timeout, 7)
-        self.assertEqual(result.qos, 1)
+        self.assertEqual(result.qos, 0)
         self.assertEqual(result.client_id, '')
-        self.assertEqual(result.topic, 'rclone-multithreaded-upload/result')
+        self.assertEqual(result.topic, 'homeassistant/jobs/status')
 
-    def test_ambiguous_legacy_and_unknown_options_are_rejected(self):
-        for config in ({'completion': {}, 'mqtt': {}}, {'completion': {'enabeld': True}},
-                       {'mqtt': {'retain': True}}, {'mqtt': {'tls_insecure': True}},
-                       {'mqtt': {'timeout': 5, 'publish_timeout': 5}}, {'completion': None}):
-            with self.subTest(config=config), self.assertRaises(ValueError):
-                parse_mqtt_config(config)
+    def test_removed_completion_keys_and_unknown_options_are_rejected(self):
+        for raw in ({'publish_timeout': 7}, {'keepalive': 60}, {'retain': False},
+                    {'tls_insecure': False}, {'enabeld': True}, None):
+            with self.subTest(raw=raw), self.assertRaises(ValueError):
+                parse_completion_config({'completion': raw})
         with self.assertRaises(ValueError):
             parse_live_config({'live': {'enabeld': True}}, Path('/tmp/config.json'))
 
@@ -240,7 +239,7 @@ class ProgressTests(unittest.TestCase):
 
     def test_diagnostics_are_bounded_and_redacted_in_both_channels(self):
         with StateSnapshot():
-            STATE.mqtt = MqttConfig(username='user', password='secret-value')
+            STATE.completion = MQTTConfig(username='user', password='secret-value')
             STATE.live_config = LiveConfig(username='user', password='live-secret')
             STATE.live_preview = LivePreview(LiveConfig(), name='Camera uploads', job='rclone')
             STATE.run_error = STATE.stderr_tail = ''

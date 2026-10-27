@@ -3,10 +3,6 @@
 from dataclasses import dataclass, field
 
 
-# Public compatibility alias; the completion config follows the supplied template.
-from .mqtt_status import MQTTConfig as MqttConfig
-
-
 @dataclass
 class DirectoryCleanupRule:
     """One cleanup rule owned by one UploadDirectory."""
@@ -78,16 +74,6 @@ class RemoteFile:
     path: str
     size: int
     modified: str
-
-
-@dataclass(frozen=True)
-class RemoteQuotaFile:
-    """Compatibility model for a managed file relative to one upload root."""
-
-    path: str
-    size: int
-    modified: str
-    source_folder: str
 
 
 @dataclass

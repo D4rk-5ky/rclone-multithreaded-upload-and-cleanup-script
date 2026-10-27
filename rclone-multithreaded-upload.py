@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Compatibility entry point for rclone-multithreaded-upload."""
+"""CLI entry point for rclone-multithreaded-upload."""
 
 import sys
 
 from rclone_multithreaded_upload.main import main
+from rclone_multithreaded_upload.process_lifecycle import supervised_main
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(supervised_main(main))

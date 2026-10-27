@@ -31,7 +31,7 @@ class ReportTests(unittest.TestCase):
         self.assertEqual(payload['status'], 'success')
         self.assertIs(payload['success'], True)
         self.assertEqual(payload['error'], '')
-        self.assertEqual(json.loads(m.build_mqtt_status_payload(name='x', job='x', exit_code=0))['exit_code'], 0)
+        self.assertEqual(json.loads(m.encode_report(m.build_report(name='x', job='x', exit_code=0)))['exit_code'], 0)
 
     def test_generic_completion_report_contains_no_dataset_sections(self):
         for key in ('planned_datasets', 'skipped_datasets', 'failed_datasets',
@@ -82,7 +82,7 @@ class ReportTests(unittest.TestCase):
         self.assertIn('æøå', text)
 
     def test_extra_project_details_and_datasets_are_detached(self):
-        extra = {'script_name': 'Camera uploads', 'remotes': [{'name': 'Cloud'}]}
+        extra = {'context': 'Camera uploads', 'remotes': [{'name': 'Cloud'}]}
         datasets = [{'source': 'pool/a', 'destination': 'backup/a'}]
         payload = self.report(extra=extra, skipped_datasets=datasets)
         extra['remotes'][0]['name'] = 'changed'

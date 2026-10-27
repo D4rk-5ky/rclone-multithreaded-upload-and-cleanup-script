@@ -13,26 +13,17 @@ A failure is retained for the affected remote. Other remotes continue. A remote 
 
 ## `rclone-multithreaded-upload.py`
 
-Compatibility executable entry point.
+Executable entry point calling supervised_main(main).
 
-```python
-from rclone_multithreaded_upload.main import main
-sys.exit(main())
-```
-
-Why: keeps the original executable filename stable while all real logic remains inside the package.
+Why: retain the documented CLI filename while the supervisor owns the isolated job group, handles termination deadlines and detects death of either app PID. Help/version/validation retain direct behavior.
 
 ## `rclone_multithreaded_upload/__init__.py`
 
-### `APPLICATION_NAME`, `VERSION` / `__version__`
+### `APPLICATION_NAME`, `VERSION`
 
 Shared application identity and single version source. Reporting and live config reuse APPLICATION_NAME; CLI `--version` imports this value so the displayed version and packaged release version stay aligned.
 
 ## `models.py`
-
-### `MqttConfig`
-
-Compatibility alias for the supplied template's frozen `MQTTConfig`. Contains completion-channel broker, TLS, timeout and notification-policy settings; its password is hidden from repr. Canonical root config is `completion`; `mqtt` is a translated legacy alias. See `MQTT.md`.
 
 ### `DirectoryCleanupRule`
 
@@ -76,12 +67,6 @@ Immutable representation of one recursive `rclone lsjson` file entry: path, size
 
 Why: cleanup/quota decisions can be calculated from one live snapshot instead of repeatedly listing the provider.
 
-### `RemoteQuotaFile`
-
-Compatibility model containing path, size, modification time, and the source cleanup folder that manages the file.
-
-Why: retains compatibility with the older helper interface while the current planner mainly uses `RemoteFile`.
-
 ### `RemoteSnapshot`
 
 In-memory mapping of normalized relative path to `RemoteFile` for one remote root.
@@ -108,7 +93,7 @@ Why: failures must survive until the final summary even when later stages contin
 
 ### `StepRunResult`
 
-Stores one planned operation's label, legacy stage, kind, observation status, reason/error and UTC start/finish times. It never controls execution. A RemoteRunResult owns an insertion-ordered map of these objects so its denominator is fixed and its history is retained independently of parallel workers.
+Stores one planned operation's label, summary stage, kind, observation status, reason/error and UTC start/finish times. It never controls execution. A RemoteRunResult owns an insertion-ordered map of these objects so its denominator is fixed and its history is retained independently of parallel workers.
 
 ### `RemoteRunResult`
 
@@ -139,7 +124,6 @@ Important fields include:
 - `delete_list_dir`
 - `sleep_after_step`
 - `reservation_safety_headroom_bytes`
-- `reserved_upload_bytes`
 - `planned_upload_files`
 - `run_results`
 
@@ -182,6 +166,12 @@ Why: the application gets normal argparse behavior while tests can exercise exac
 
 ## `config.py`
 
+### `reject_unknown_options(...)`
+
+Compare supplied keys against the current allowed set and raise a section-qualified error for unsupported keys.
+
+Why: Old settings and misspellings must fail before destructive work rather than silently disabling notification or cleanup settings.
+
 ### `load_json_config(config_path)`
 
 Checks that the path exists and is a file, parses UTF-8 JSON, and requires a JSON object at the root.
@@ -218,12 +208,6 @@ Reads a non-negative integer.
 
 Why: used for sleeps/thread values before the separate minimum-thread checks.
 
-### `optional_int_in_range(section_name, config, key, default, minimum, maximum)`
-
-Reads a strict integer inside an inclusive range.
-
-Why: the legacy MQTT keepalive setting needs a bounded integer; booleans must not pass as integers. The template config classes validate canonical MQTT numeric settings.
-
 ### `optional_positive_int_or_none(section_name, config, key)`
 
 Reads a positive integer or `null`.
@@ -238,7 +222,7 @@ Why: rclone option arrays must remain tokenized safely without shell parsing.
 
 ### Reporting config helpers
 
-`_reporting_config()` rejects unknown options, resolves relative TLS files beside the JSON config and invokes the template's strict config validator. `parse_mqtt_config()` loads canonical `completion` or translates legacy `mqtt` settings. `parse_live_config()` independently loads `live`, deriving a stable host/config device identity when no explicit device ID is supplied. See `MQTT.md` for migration.
+`_reporting_config()` rejects unknown options, resolves relative TLS files beside the JSON config and invokes the template's strict config validator. `parse_completion_config()` loads only current `completion` settings through the canonical MQTTConfig. `parse_live_config()` independently loads `live`, deriving a stable host/config device identity when no explicit device ID is supplied. See `MQTT.md` for current settings.
 
 ### `parse_cleanup_rules(section_name, raw_upload)`
 
@@ -256,7 +240,7 @@ Why: users cannot accidentally recreate the transfer-limit failure, override ded
 
 ### `load_config(config_path_text)`
 
-Loads the complete config into `STATE`, including root `script_name`, `comment`, independent template `completion` / `live` settings (or the translated legacy `mqtt` alias), and validates thread limits, configured path strings, and legacy schema rejection. This is configuration validation, not a broker/remote connectivity or source-content check. It also fully parses `delete_min_age` before assigning runtime state, so `--validate-config` catches invalid age/duration values instead of deferring the error until cleanup planning.
+Loads the complete config into `STATE`, including root `script_name`, `comment`, independent template `completion` / `live` settings, and validates thread limits, configured path strings, and strict rejection of unsupported keys at every config level. This is configuration validation, not a broker/remote connectivity or source-content check. It also fully parses `delete_min_age` before assigning runtime state, so `--validate-config` catches invalid age/duration values instead of deferring the error until cleanup planning.
 
 It rejects obsolete top-level `directory_cleanup_rules`.
 
@@ -268,11 +252,11 @@ Reject unknown MQTT options, resolve TLS file paths beside the config, and const
 
 Why: Configuration mistakes must fail before runtime; certificate paths must not depend on the launch directory.
 
-### `parse_mqtt_config(...)`
+### `parse_completion_config(...)`
 
-Load canonical completion settings or translate the mutually exclusive legacy mqtt alias, including its old timeout/defaults.
+Parse only the current completion section with the canonical MQTTConfig and shared TLS-path/unknown-key validation.
 
-Why: Existing configs remain readable while final events obey the same typed, non-retained template contract.
+Why: There is one supported reporting config format, with no legacy translation or alternate defaults.
 
 ### `parse_live_config(...)`
 
@@ -318,12 +302,6 @@ Joins a remote root with one relative cleanup path.
 
 Why: config remains relative while runtime cleanup targets are explicit full paths.
 
-### `join_relative_path(base, child)`
-
-Joins two normalized relative path fragments.
-
-Why: avoids repeated slash-handling logic.
-
 ### `normalize_relative_path(path)`
 
 Normalizes backslashes and strips leading/trailing slashes.
@@ -351,6 +329,8 @@ Why: human-readable summaries should not change the integer values used by logic
 ## `commands.py`
 
 ### `run_command(command, capture_output=False)`
+
+Check the cancellation fence immediately before subprocess.run, so a worker cannot deliberately launch the next rclone command once a stop is requested. Command arguments and output capture stay unchanged.
 
 Runs an argument list with `subprocess.run`, `text=True`, and never uses `shell=True`.
 
@@ -432,12 +412,6 @@ Returns the deduplicated union of files covered by all cleanup rules for an uplo
 
 Why: overlapping cleanup rules must not double-count files for `max_total_size`.
 
-### `get_upload_remote_quota_entries(upload)`
-
-Compatibility helper that fetches a live snapshot and converts managed files to `RemoteQuotaFile` entries.
-
-Why: preserves the older quota-helper interface without duplicating snapshot/filtering logic.
-
 ## `planning.py`
 
 ### `cleanup_targets_for_upload(cleanup_directories, upload)`
@@ -504,6 +478,12 @@ Why: preserves mixed delete modes while minimizing delete commands, prevents con
 
 ## `reservation.py`
 
+### `split_copy_options(...)`
+
+Scan copy_options once and return ordered source-filter and transfer-only lists, retaining boolean flags, split values and equals-form options. Reject a missing source-filter value.
+
+Why: Local selection and transfer commands must share one classification implementation without passing source filters alongside the frozen exact upload list.
+
 ### `clear_local_size_cache()`
 
 Clears the per-run concurrent filtered-local-snapshot future cache.
@@ -515,18 +495,6 @@ Why: one run must not reuse stale file identities from an earlier invocation in 
 Requires the local path to exist and be a directory.
 
 Why: snapshotting/upload should fail before starting an invalid source command.
-
-### `get_size_filter_options(upload)`
-
-Extracts source-selection filters from `copy_options` for the local `rclone lsjson` snapshot. Supported selection flags include age/size filters, include/exclude/filter files, `--files-from*`, `--exclude-if-present`, `--hash-filter`, and `--ignore-case`.
-
-Why: the local snapshot must represent the same candidate set the user configured without carrying unrelated transfer options such as stats or concurrency.
-
-### `get_non_filter_copy_options(upload)`
-
-Returns `copy_options` with source-selection flags removed.
-
-Why: once quota planning has frozen the exact selected paths, the transfer uses generated `--files-from0`; rclone ignores other filters when `--files-from*` is present, so removing them keeps the command unambiguous while preserving non-filter runtime options.
 
 ### `local_size_cache_key(upload)`
 
@@ -545,12 +513,6 @@ Why: quota selection requires exact complete-file identities and modification ti
 Implements concurrent single-flight local snapshotting using a shared `Future`: one owner scans and matching workers wait for/reuse the exact result.
 
 Why: GDrive/Mega/OneDrive-style uploads of the same source should not each rescan the local tree.
-
-### `get_filtered_local_upload_size(job_number, upload)`
-
-Compatibility helper that returns `(total_bytes, file_count)` from the cached exact local snapshot.
-
-Why: existing internal callers/tests that only need aggregate sizing can reuse the same snapshot without another rclone command.
 
 ### `newest_first_local_files(files)`
 
@@ -581,7 +543,7 @@ Behavior:
 
 Why: trash emptying is optional and backend-dependent, and upload defaults or hard-delete overrides must not purge unrelated backend trash.
 
-`cleanup.py` also re-exports `execute_delete_plan` so phase code can import both cleanup actions from one module.
+Phase code imports execute_delete_plan directly from delete_plan.py; cleanup.py owns only the backend trash operation.
 
 ## `upload.py`
 
@@ -592,6 +554,8 @@ Serializes one streamed upload output line under the global output lock.
 Why: concurrent rclone output remains readable and attributed to the correct remote.
 
 ### `run_command_streamed(command, thread_number, remote_path)`
+
+Check the cancellation fence immediately before Popen; retain the original streamed output and return behavior. The CLI supervisor owns this subprocess group and stops it during cancellation.
 
 Starts the upload process with merged stdout/stderr, streams lines live, captures them for later error reporting, and returns `(return_code, output)`.
 
@@ -779,7 +743,7 @@ Why: concurrent work ends with one deterministic readable summary.
 
 `_stage_errors()` sanitizes and flattens stage failures. `build_result_payload()` calls the template's `build_report()` with rclone identity, authoritative integer exit code, diagnostic tail, warnings and run ID. Rclone fields remain as extensions: event, script/application identity, failed remotes and detailed remote results. It emits no Syncerate dataset sections.
 
-`publish_result_payload()` delegates to the template's isolated, deadline-bounded publisher. `publish_final_result()` applies the enabled gate and logs sanitized sent/skipped/failed delivery without replacing the job's code. Success filtering belongs to the completion config only.
+`publish_final_result()` applies the enabled gate and logs sanitized sent/skipped/failed delivery without replacing the job's code. Success filtering belongs to the completion config only.
 
 ### `_stage_errors(...)`
 
@@ -792,12 +756,6 @@ Why: Structured remote diagnostics must survive without exposing known credentia
 Snapshot per-remote results, aggregate errors, and call the existing template builder with the authoritative job code and rclone extensions.
 
 Why: Completion fields stay template-compatible without duplicating the template serializer or losing rclone details. Standard fields remain authoritative; top-level progress and per-remote progress add the detailed final snapshot.
-
-### `publish_result_payload(...)`
-
-Delegate the payload and active completion config to publish_report.
-
-Why: All completion gates, TLS and deadline behavior belong to the existing template transport.
 
 ### `publish_final_result(...)`
 
@@ -844,12 +802,6 @@ Why: Every adapter must follow one contract, preserve metadata and avoid mutable
 Validate required field types, schema version and status/success/code agreement, then serialize with _json_text.
 
 Why: Mutated or manually created inconsistent reports must not be sent as valid completion events.
-
-### `build_mqtt_status_payload(...)`
-
-Call build_report followed by encode_report and return the JSON string.
-
-Why: Callers needing serialized completion JSON should reuse the same builder and validation rules.
 
 ### `MQTTConfig.__post_init__(...)`
 
@@ -1029,7 +981,7 @@ Why: The overall denominator must be the sum of truthful per-destination plans, 
 
 ### `plan_steps.add(...)`
 
-Add one typed observation with its label, legacy stage and kind.
+Add one typed observation with its label, summary stage and kind.
 
 Why: The builder should initialize every step consistently without duplicate control logic.
 
@@ -1087,7 +1039,7 @@ Also derive activity labels/counts from this destination's RUNNING observations.
 
 Why: The overview must show which part each worker is doing, without changing worker scheduling.
 
-Snapshot a destination's complete ordered step table, counts/current operations, per-cleanup-path pre/post counters, legacy stages, diagnostics and error flags while the caller owns the results lock.
+Snapshot a destination's complete ordered step table, counts/current operations, per-cleanup-path pre/post counters, summary stages, diagnostics and error flags while the caller owns the results lock.
 
 Why: Each destination needs its own consistent view, independent of the last reporting worker.
 
@@ -1097,7 +1049,7 @@ Also sum activity counts across the same destination snapshot and build the top 
 
 Why: The run overview must represent every active destination rather than whichever thread last updated a field.
 
-Build all destination snapshots once and sum their fixed totals and settled/running/failure/skip counts, retaining the legacy four-stage counters.
+Build all destination snapshots once and sum their fixed totals and settled/running/failure/skip counts, retaining the four-stage counters.
 
 Why: One atomic details object must agree with the whole-run counters and report every active worker.
 
@@ -1135,7 +1087,7 @@ Why: Progress observations must never become a prerequisite for upload/cleanup w
 
 ### `refresh_live(...)`
 
-Serialize concurrent snapshots under adapter/result locks, use progress_snapshot_locked for detailed counters and all active destinations, and map the authoritative legacy outcomes to live result lists.
+Serialize concurrent snapshots under adapter/result locks, use progress_snapshot_locked for all destination counters/current operations, and map authoritative stage outcomes to live result lists. The keyword-only clear_current flag clears the summary at finish; ignored positional labels are not supported.
 
 Why: Counters must not move backward due to racing workers; only actual outcomes should classify success, failure or skipped.
 
@@ -1189,19 +1141,17 @@ Why: a process must not delete a lock it does not own.
 
 ### `signal_handler(signum, frame)`
 
+Set cooperative cancellation without printing from a signal handler, notify the outer owner even when htop signals the inner job directly, and exit with 128+signal on the first request. Repeated inner signals do not raise another exception during finalization.
+
 Prints the signal and raises `SystemExit(128 + signum)`. Main finalizes enabled reporting channels before releasing the owned lock.
 
 Why: handled termination should not leave a stale lock behind.
 
-### `sleep_after_step()`
-
-Legacy/shared helper that prints and sleeps for `STATE.sleep_after_step`.
-
-Why: retained as a reusable configured-delay helper. The current barriered pre-upload flow performs its per-remote delay directly in `pre_upload_trash_cleanup_one_remote()` so each eligible trash worker reaches the upload barrier only after its delay.
-
 ## `main.py`
 
 ### `main()`
+
+Reset per-invocation cancellation, register SIGINT/SIGTERM/SIGHUP/SIGQUIT handling, preserve signal exit codes and interrupted outcomes, and clear cancellation after final reporting/lock release. The compatibility CLI calls this inside supervised_main; direct library calls do not install the outer supervisor.
 
 Top-level application orchestration:
 
@@ -1545,6 +1495,12 @@ Why: Reuse the original full-flow assertions while proving both outcome JSON con
 
 ## `tests/test_logic.py`
 
+### `ConfigValidationTests.test_unknown_options_and_removed_sections_are_rejected_before_work(...)`
+
+Run the actual validation CLI with obsolete root sections and unknown root/thread/upload/cleanup keys; require a nonzero exit and a precise unknown-option error.
+
+Why: Removing conversion code must fail closed instead of silently accepting unsafe or disabled settings.
+
 ### `StateSnapshot.__enter__(...)`
 
 Snapshot shared runtime state before a test.
@@ -1695,7 +1651,7 @@ Check delete list remote names are collision resistant.
 
 Why: Detect regressions in this behavior using offline assertions against the actual implementation.
 
-### `LogicTests.test_size_filter_options_only_copy_source_selection_filters(...)`
+### `LogicTests.test_copy_options_partition_preserves_filters_and_transfer_options(...)`
 
 Check size filter options only copy source selection filters.
 
@@ -2077,15 +2033,15 @@ Check default live identity is stable and separates configs.
 
 Why: Detect regressions in this behavior using offline assertions against the actual implementation.
 
-### `ConfigTests.test_legacy_mqtt_translation(...)`
+### `ConfigTests.test_current_completion_config_uses_template_defaults_and_timeout(...)`
 
-Check legacy mqtt translation.
+Check current template defaults and explicit publish timeout.
 
 Why: Detect regressions in this behavior using offline assertions against the actual implementation.
 
-### `ConfigTests.test_ambiguous_legacy_and_unknown_options_are_rejected(...)`
+### `ConfigTests.test_removed_completion_keys_and_unknown_options_are_rejected(...)`
 
-Check ambiguous legacy and unknown options are rejected.
+Check obsolete completion keys and unknown options are rejected.
 
 Why: Detect regressions in this behavior using offline assertions against the actual implementation.
 
@@ -2233,9 +2189,9 @@ Why: Role-marker discovery must continue working when entities are renamed.
 
 ### `CardTests.setUp(...)`
 
-Create a strict native Jinja environment, HA bool filter, fake registry and actual Markdown card content.
+Create the strict HA/Jinja test environment and fake registry, then load the actual template content from manufacturer-live-preview-card.yaml.
 
-Why: Card tests must render the delivered template rather than a duplicate implementation.
+Why: Card tests must exercise the single deliverable the user installs rather than a duplicate source file.
 
 ### `CardTests.state(...)`
 
@@ -2261,11 +2217,11 @@ Parse an ISO timestamp with a safe fallback.
 
 Why: Simulate the HA datetime helper for card finish-time rendering.
 
-### `CardTests.test_yaml_wrapper_preserves_markdown_content(...)`
+### `CardTests.test_yaml_card_contains_complete_manufacturer_template(...)`
 
-Check yaml wrapper preserves markdown content.
+Parse the retained YAML card, require its Markdown type, manufacturer selector, role recognition and destination table, and compile its Jinja content.
 
-Why: Guard this named behavior with offline assertions using the actual discovery, payload, template or application implementation.
+Why: The one shipped YAML file must be complete; a duplicate raw Markdown file is no longer needed for tests or installation.
 
 ### `CardTests.test_manufacturer_filter_and_custom_name(...)`
 
@@ -2348,7 +2304,7 @@ Why: Guard this named behavior with offline assertions using the actual discover
 
 # Manufacturer Markdown card lookup
 
-`manufacturer-live-preview-card.md` and its literal YAML wrapper use the same Jinja template, preset to `rclone-multithreaded-upload`. There are no Python functions in these files. The template scans `states.sensor`, resolves `device_id` and `device_attr(..., 'manufacturer')`, deduplicates devices, and finds status/last-result entities through `live_preview_role` attributes using `device_entities` and `state_attr`. It reads complete JSON attributes for fields, uses the active heartbeat or appropriate retained result, escapes diagnostics, and keeps unknown metrics unknown. This avoids hardcoded entity IDs and supports renamed entities and newly added jobs. Average speed is shown only when actual bytes and elapsed time are known.
+`manufacturer-live-preview-card.yaml` contains the complete Jinja template, preset to `rclone-multithreaded-upload`. There are no Python functions in this file. The template scans `states.sensor`, resolves `device_id` and `device_attr(..., 'manufacturer')`, deduplicates devices, and finds status/last-result entities through `live_preview_role` attributes using `device_entities` and `state_attr`. It reads complete JSON attributes for fields, uses the active heartbeat or appropriate retained result, escapes diagnostics, and keeps unknown metrics unknown. This avoids hardcoded entity IDs and supports renamed entities and newly added jobs. Average speed is shown only when actual bytes and elapsed time are known.
 
 The optional `requirements-test.txt` command (`python3 -m pip install -r requirements-test.txt`) installs Jinja2/PyYAML for local rendering checks. `python3 -m unittest discover -s tests -v` runs the full offline suite; these dependencies are not required by the upload/cleanup runtime or its MQTT publisher.
 
@@ -2609,3 +2565,215 @@ The card reads details.remote_jobs under the same manufacturer/role discovery as
 The source safety audit strips only observer additions from ASTs and verifies the original operation bodies/decisions match. Existing fake-rclone tests separately prove command arguments, snapshot counts, file selection, trash behavior and stage barriers remain correct.
 
 The progress module's `ACTIVITY_LABELS` constant maps existing operation kinds to readable overview labels, with trash steps identified by their stable IDs. Card templates loop over `details.remote_jobs` directly; they never cap destination rows with the separate generic result-list display limit.
+
+## `process_lifecycle.py`
+
+All process ownership belongs to the documented CLI invocation's isolated group/session. Normal barriers and command arguments remain unchanged. No process-name matching is used. Linux /proc matching is limited to that group/session, with pidfds preventing PID-reuse races when stopping individual children.
+
+### `reset_cancellation(...)`
+
+Start/finish an invocation without leaking cancellation into later calls.
+
+Why: Allow repeated main() invocations and tests without carrying an old stop into a new job.
+
+### `request_cancellation(...)`
+
+Fence new work immediately; return whether this is the first stop request.
+
+Why: Fence new work before the interpreter unwinds a thread-pool context.
+
+### `notify_supervisor(...)`
+
+Also supervise signals delivered directly to the inner job PID in htop.
+
+Why: Signals aimed at the inner job in htop must also activate the outer owner's escalation deadline.
+
+### `check_cancelled(...)`
+
+Abort a queued operation before it can start more rclone work.
+
+Why: Prevent both queued operations and subsequent commands from starting after a stop request.
+
+### `wait_or_cancel(...)`
+
+Keep configured waits interruptible, including waits inside pool threads.
+
+Why: Configured delays must not hold thread-pool shutdown open.
+
+### `StopAwareExecutor.submit(...)`
+
+Submit a cancellation-guarded task to the existing thread pool.
+
+Why: Preserve original function arguments while rejecting newly submitted/started work after cancellation.
+
+### `StopAwareExecutor.submit.guarded(...)`
+
+Check cancellation just before calling the original operation.
+
+Why: Close the gap between submission and actual worker start for queued destinations.
+
+### `StopAwareExecutor.__exit__(...)`
+
+On interruption cancel queued futures and wait for running workers to finish.
+
+Why: Cancel pending futures while joining running workers; preserve normal successful global barriers.
+
+### `_signal_group(...)`
+
+Signal only the new process group created for this invocation.
+
+Why: Restrict forwarded/forced signals to the one isolated group created for this run.
+
+### `_watch_supervisor(...)`
+
+EOF means the outer owner died, even through SIGKILL; stop our whole group.
+
+Why: SIGKILL cannot be caught, but closing the supervisor's ownership pipe can still be detected by the surviving job.
+
+### `_enable_subreaper(...)`
+
+On Linux adopt orphaned job descendants so the supervisor can reap them.
+
+Why: Adopt orphaned ordinary descendants so the still-running Linux supervisor can reap them after cleanup.
+
+### `_kill_group_children(...)`
+
+On Linux force stopped-job children out of blocking pipes, retaining the job.  Match the isolated group/session and use pidfds to avoid PID reuse races. The job can then finalize its interrupted report and release its own lock.
+
+Why: Force-stop stubborn descendants holding output pipes, while leaving the job alive for interrupted reporting and lock release.
+
+### `_reap_group(...)`
+
+Reap adopted children after group cleanup without waiting indefinitely.
+
+Why: Avoid leaving adopted zombies and avoid an unlimited cleanup wait.
+
+### `supervised_main(...)`
+
+Run normal CLI work in an owned session with two-way death protection.  Help/version/validation and template worker hooks retain their direct behavior. A normal stop gets five seconds for cleanup/final reporting before force-kill.
+
+Why: Cover normal exits, catchable signals and death of either app PID without altering rclone/MQTT commands.
+
+### `supervised_main.forward(...)`
+
+Record/forward the first signal and maintain early-child and final-job deadlines; a repeated signal forces the group.
+
+Why: Preserve the first signal exit code, forward it to owned work, and force termination on a repeated supervisor signal.
+
+The entry script calls `supervised_main(main)`. Its private `--internal-supervised-job READ_FD NOTICE_FD` marker is only for the supervisor's own re-exec, with inherited pipe descriptors; it is not a supported user command. Public CLI flags remain --help/-h, --config/-c, --validate-config and --version. Kill commands documented in PROCESS_LIFECYCLE.md send INT/TERM/HUP/QUIT/KILL to this invocation's supervisor or job PID. The process group and five-second deadline are fixed lifecycle behavior, not new config options.
+
+## `tests/test_process_lifecycle.py`
+
+### `running(...)`
+
+Treat a zombie awaiting the system reaper as stopped, never as executing work.
+
+Why: Verify process ownership/cancellation using offline fixtures rather than production services or unrelated processes.
+
+### `wait_for(...)`
+
+Poll a fixture predicate until a bounded deadline.
+
+Why: Verify process ownership/cancellation using offline fixtures rather than production services or unrelated processes.
+
+### `CancellationTests.tearDown(...)`
+
+Clear the shared cancellation event after each test.
+
+Why: Verify process ownership/cancellation using offline fixtures rather than production services or unrelated processes.
+
+### `CancellationTests.test_no_new_rclone_commands_start_after_cancellation(...)`
+
+Set cancellation and assert both command launch paths abort without invoking subprocess functions.
+
+Why: Verify process ownership/cancellation using offline fixtures rather than production services or unrelated processes.
+
+### `CancellationTests.test_configured_worker_wait_is_interruptible(...)`
+
+Hold a 120-second configured wait in a thread, cancel and require prompt completion.
+
+Why: Verify process ownership/cancellation using offline fixtures rather than production services or unrelated processes.
+
+### `CancellationTests.test_configured_worker_wait_is_interruptible.waiting(...)`
+
+Record that the cancellation-aware wait raised KeyboardInterrupt in its worker.
+
+Why: Verify process ownership/cancellation using offline fixtures rather than production services or unrelated processes.
+
+### `CancellationTests.test_interrupted_pool_cancels_queued_jobs_and_joins_running_worker(...)`
+
+Queue ten operations behind a held worker, cancel/unwind the pool and require every queued operation to be cancelled or interrupted.
+
+Why: Verify process ownership/cancellation using offline fixtures rather than production services or unrelated processes.
+
+### `CancellationTests.test_interrupted_pool_cancels_queued_jobs_and_joins_running_worker.busy(...)`
+
+Hold one running worker while queued futures accumulate, then release it for shutdown.
+
+Why: Verify process ownership/cancellation using offline fixtures rather than production services or unrelated processes.
+
+### `ProcessTreeTests.stalled_job(...)`
+
+Run the real supervisor around an unresponsive inner job and check either the five-second deadline or immediate repeated-signal escalation.
+
+Why: Verify process ownership/cancellation using offline fixtures rather than production services or unrelated processes.
+
+### `ProcessTreeTests.test_unresponsive_job_is_forced_out_at_shutdown_deadline(...)`
+
+Require a SIGTERM-ignoring job to be killed at the configured deadline with exit 143.
+
+Why: Verify process ownership/cancellation using offline fixtures rather than production services or unrelated processes.
+
+### `ProcessTreeTests.test_second_stop_signal_forces_immediate_group_cleanup(...)`
+
+Send TERM then INT to the supervisor; require prompt force-kill and preservation of the first signal code.
+
+Why: Verify process ownership/cancellation using offline fixtures rather than production services or unrelated processes.
+
+### `ProcessTreeTests.run_case(...)`
+
+Build harmless fake rclone/Paho workers and stubborn descendants, run the real CLI, signal the chosen app PID, and assert all owned processes stop while an unrelated sentinel survives. Also verify normal leftovers, exit codes, queued-work exclusion and graceful lock release.
+
+Why: Verify process ownership/cancellation using offline fixtures rather than production services or unrelated processes.
+
+### `ProcessTreeTests.run_case.ready(...)`
+
+Read atomic fixture PID records until enough actual destination and optional live-MQTT operations have started.
+
+Why: Verify process ownership/cancellation using offline fixtures rather than production services or unrelated processes.
+
+### `ProcessTreeTests.test_sigint_stops_uploads_descendants_and_queued_destination(...)`
+
+Send SIGINT to the supervisor during two active uploads and verify process-tree cleanup and cancellation of the third destination.
+
+Why: Verify process ownership/cancellation using offline fixtures rather than production services or unrelated processes.
+
+### `ProcessTreeTests.test_sigterm_stops_snapshot_and_live_mqtt_process_trees(...)`
+
+Send SIGTERM during parallel snapshots plus a live MQTT worker, including stubborn helper descendants.
+
+Why: Verify process ownership/cancellation using offline fixtures rather than production services or unrelated processes.
+
+### `ProcessTreeTests.test_sigkill_of_supervisor_triggers_job_watchdog(...)`
+
+Kill the outer owner with SIGKILL and require the surviving pipe watchdog to stop the job group.
+
+Why: Verify process ownership/cancellation using offline fixtures rather than production services or unrelated processes.
+
+### `ProcessTreeTests.test_sigkill_of_inner_job_is_cleaned_by_supervisor(...)`
+
+Kill the inner job with SIGKILL and require the supervisor to stop remaining rclone/MQTT children.
+
+Why: Verify process ownership/cancellation using offline fixtures rather than production services or unrelated processes.
+
+### `ProcessTreeTests.test_sigterm_directly_to_inner_job_escalates_stubborn_workers(...)`
+
+Signal the inner htop PID, verifying the notification pipe activates supervisor escalation for SIGTERM-ignoring workers.
+
+Why: Verify process ownership/cancellation using offline fixtures rather than production services or unrelated processes.
+
+### `ProcessTreeTests.test_normal_exit_also_removes_lingering_descendants(...)`
+
+Let transfers succeed while harmless descendants linger, then require normal-exit cleanup to stop them.
+
+Why: Verify process ownership/cancellation using offline fixtures rather than production services or unrelated processes.

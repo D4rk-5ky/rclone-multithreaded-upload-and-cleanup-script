@@ -3,6 +3,7 @@
 import subprocess
 
 from .reporting import append_diagnostics
+from .process_lifecycle import check_cancelled
 
 
 def run_command(
@@ -11,6 +12,7 @@ def run_command(
 ) -> subprocess.CompletedProcess:
     """Run a command without shell=True."""
     print(f"Running command: {' '.join(command)}", flush=True)
+    check_cancelled()
     result = subprocess.run(
         command,
         text=True,

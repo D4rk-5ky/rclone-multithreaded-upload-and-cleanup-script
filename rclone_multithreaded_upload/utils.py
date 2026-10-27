@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 import hashlib
 import re
 
-from .models import RemoteFile, RemoteQuotaFile
+from .models import RemoteFile
 
 
 ALLOWED_UPLOAD_COMMANDS = {"copy", "sync", "move"}
@@ -159,16 +159,6 @@ def join_rclone_remote_path(remote_root: str, relative_path: str) -> str:
     return f"{remote_root}/{relative_path}"
 
 
-def join_relative_path(base: str, child: str) -> str:
-    base = base.strip("/")
-    child = child.strip("/")
-    if not base:
-        return child
-    if not child:
-        return base
-    return f"{base}/{child}"
-
-
 def normalize_relative_path(path: str) -> str:
     return path.replace("\\", "/").strip("/")
 
@@ -185,7 +175,7 @@ def parse_rclone_modtime(modified: str) -> datetime:
 
 
 def remote_file_oldest_sort_key(
-    file: RemoteFile | RemoteQuotaFile,
+    file: RemoteFile,
 ) -> tuple[datetime, str]:
     return parse_rclone_modtime(file.modified), file.path
 

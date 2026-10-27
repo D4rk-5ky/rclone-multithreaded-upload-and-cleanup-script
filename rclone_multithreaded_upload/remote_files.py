@@ -3,7 +3,7 @@
 import json
 
 from .commands import is_directory_not_found, run_command
-from .models import CleanupTarget, RemoteFile, RemoteQuotaFile, RemoteSnapshot, UploadDirectory
+from .models import CleanupTarget, RemoteFile, RemoteSnapshot, UploadDirectory
 from .output import print_job_block
 from .utils import normalize_relative_path, parse_rclone_modtime
 
@@ -144,23 +144,3 @@ def get_managed_snapshot_files(
                 files.append(file)
                 break
     return files
-
-
-def get_upload_remote_quota_entries(upload: UploadDirectory) -> list[RemoteQuotaFile]:
-    """Compatibility helper: one live root snapshot followed by managed filtering."""
-    snapshot = fetch_remote_snapshot(upload.remote_path)
-    managed_rule_paths = [normalize_relative_path(rule.path) for rule in upload.cleanup_rules]
-    entries: list[RemoteQuotaFile] = []
-    for file in get_managed_snapshot_files(upload, snapshot):
-        source_folder = "/"
-        for rule_path in managed_rule_paths:
-            if not rule_path:
-                source_folder = "/"
-                break
-            if file.path == rule_path or file.path.startswith(f"{rule_path}/"):
-                source_folder = rule_path
-                break
-        entries.append(
-            RemoteQuotaFile(file.path, file.size, file.modified, source_folder)
-        )
-    return entries

@@ -11,6 +11,7 @@ from .mqtt import build_result_payload, publish_final_result
 from .mqtt_status import run_worker_if_requested as completion_worker
 from .output import print_error, print_step
 from .progress import finish_steps
+from .process_lifecycle import reset_cancellation, request_cancellation, notify_supervisor
 from .phases import (
     run_final_verification,
     run_post_upload_cleanup_phase,
@@ -26,6 +27,7 @@ from .targets import build_cleanup_directories
 def main() -> int:
     completion_worker()
     live_worker()
+    reset_cancellation()
     args = parse_cli_args()
     try:
         load_config(args.config)
@@ -44,6 +46,8 @@ def main() -> int:
     atexit.register(release_lock)
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
+    signal.signal(signal.SIGHUP, signal_handler)
+    signal.signal(signal.SIGQUIT, signal_handler)
     acquire_lock()  # An already-running invocation must not emit a new run result.
     exit_code, interrupted = 1, False
     try:
@@ -69,11 +73,13 @@ def main() -> int:
             print_step("Pre-upload preparation, trash cleanup, upload, post-upload cleanup, "
                        "and final verification successful")
     except KeyboardInterrupt:
+        request_cancellation()
+        notify_supervisor(signal.SIGINT)
         exit_code, interrupted = 130, True
         STATE.run_error = "Interrupted by user"
     except SystemExit as error:
         exit_code = error.code if type(error.code) is int else (0 if error.code is None else 1)
-        interrupted = exit_code in (130, 143)
+        interrupted = exit_code in (129, 130, 131, 143)
         STATE.run_error = f"Run exited early with code {exit_code}"
     except Exception as error:
         exit_code = 1
@@ -102,4 +108,5 @@ def main() -> int:
         finally:
             STATE.live_preview = None
             release_lock()
+            reset_cancellation()
     return exit_code

@@ -1,6 +1,6 @@
 # Syncerate template reporting for rclone-multithreaded-upload
 
-Version 0.0.32 uses the newly supplied template: completion module 1.1.0 and live-preview module 1.2.0. The completion module is unchanged; the live module has a backward-compatible optional JSON-object `details` extension for parallel progress. Both retain their standard contracts; `mqtt.py` and `reporting.py` adapt rclone results to them.
+Version 0.0.35 uses the newly supplied template: completion module 1.1.0 and live-preview module 1.2.0. The completion wire contract and publisher worker are preserved; the unused JSON-string convenience builder is omitted; the live module has a backward-compatible optional JSON-object `details` extension for parallel progress. Both retain their standard contracts; `mqtt.py` and `reporting.py` adapt rclone results to them.
 
 ## Configure the channels independently
 
@@ -57,32 +57,26 @@ Every completion payload has these template fields:
 | `warning` | Boolean; true if any remote's overall result was skipped. Warnings do not rewrite the result code. |
 | `schema_version` | Integer 1. |
 | `comment` | Optional root `comment` string, default empty. |
-| `version` | Application version, currently `"0.0.32"`. |
+| `version` | Application version, currently `"0.0.35"`. |
 | `timestamp`, `host`, `run_id` | UTC report timestamp, local hostname, unique run identifier. Both enabled channels share the run ID. |
 
-Rclone extensions remain available: `event`, `script_name`, `application`, `application_version`, `failed_remotes`, and `remotes`. Each remote retains its name, path, status, four stage statuses, and structured stage errors. It also has a `progress` object with its own planned steps/counts/current operations; a top-level `progress` object contains the overall totals. These are non-conflicting application extensions. Generic completion events omit Syncerate dataset sections; rclone diagnostics use `remotes`. See `payload-examples.json` for full success and failure examples.
+Rclone extensions are `event`, `failed_remotes`, `remotes` and overall `progress`. Identity/version use the standard `name`, `job` and `version` fields. Each remote retains its name, path, status, four stage statuses, and structured stage errors. It also has a `progress` object with its own planned steps/counts/current operations; a top-level `progress` object contains the overall totals. These are non-conflicting application extensions. Generic completion events omit Syncerate dataset sections; rclone diagnostics use `remotes`. See `payload-examples.json` for full success and failure examples.
 
 Reports are attempted after normal job completion, unexpected runtime exceptions, SIGINT and SIGTERM once the configuration is valid and the exclusive lock has been acquired. Configuration errors and an already-existing lock do not start a reporting session. The lock stays held until final reporting finishes. Completion publication has a deadline; live progress publishes in a separate background worker.
 
-## Existing `mqtt` configs
+## Configuration validation
 
-The former root `mqtt` section is accepted as a completion-only alias. Do not specify both `mqtt` and `completion`. Migration:
+`completion` is the only supported final-notification config section. It uses `timeout` for the publish deadline. Unsupported keys are rejected; no automatic translations or compatibility defaults are applied. A root `mqtt` object, or completion options `publish_timeout`, `keepalive`, `retain` and `tls_insecure`, fail validation. Use the complete config examples and validate the resulting config before running it.
 
-- Rename `mqtt` to `completion` and `publish_timeout` to `timeout`.
-- Remove `keepalive`; the template's Paho publishing helper manages it. The legacy adapter still validates and accepts the old setting, then ignores it.
-- Remove `retain` and `tls_insecure`. Legacy values of false are accepted; true is rejected because the template requires non-retained completion events and verified TLS.
-- Replace `client_id: null` with `client_id: ""` and an unused `host: null` with `host: ""` when using the canonical section.
-- Legacy configs keep their implicit QoS 1 and former topic; canonical `completion` defaults follow the template (QoS 0 and `homeassistant/jobs/status`). Explicit example topics are unchanged.
-
-The success `error` value is now the template's empty string instead of the former null. Consumer code should read the standard `name`/`title` fields; `script_name` remains an alias. Set `live.enabled` independently if you also want a dashboard.
+The completion event is always non-retained and TLS verification follows the current template. Success uses `error: ""`. Root `script_name` sets the standard report `name`/`title`; there are no duplicate `script_name`, `application` or `application_version` output fields.
 
 ## Home Assistant examples
 
 `home-assistant-mqtt-automation.example.yaml` retains the existing Pushover and persistent notification actions, now checking that the standard status, boolean success and integer exit code agree. It ignores dry-run payloads. Change `notify.pushover` to your actual action, or remove those actions to use persistent notifications alone. Its exact topic must match `completion.topic`. The Pushover branch reuses the latest supplied template formatter: titles are bounded, message length is budgeted for metadata/error and the latest stderr tail, and shortening is indicated. Rclone remote summaries are included within that same budget. Persistent HA failure notifications keep the full report error/stderr.
 
-`manufacturer-live-preview-card.yaml` is the automatic Markdown dashboard card. Its manufacturer selector is already `rclone-multithreaded-upload`, matching the rclone adapter default and both JSON examples. It discovers matching devices and reads all available fields from the full status/last-result attributes; no entity list is required. The raw card content is also supplied as `manufacturer-live-preview-card.md`. The role markers allow published entities to be renamed. Run a live-enabled configured job to republish discovery after updating.
+`manufacturer-live-preview-card.yaml` is the automatic Markdown dashboard card. Its manufacturer selector is already `rclone-multithreaded-upload`, matching the rclone adapter default and both config examples. It discovers matching devices and reads all available fields from the full status/last-result attributes; no entity list is required. The role markers allow published entities to be renamed. Run a live-enabled configured job to republish discovery after updating.
 
-`home-assistant-live-dashboard.example.yaml` remains an optional, separate entities/gauge dashboard card. The provided JSON examples and dashboard use device ID `rclone_multithreaded_upload`. Choose distinct live device IDs for distinct configured jobs. See `LIVE_PREVIEW.md` for the live fields and options. The live topics never trigger the completion automation.
+The live packet/config examples use device ID `rclone_multithreaded_upload`. Choose distinct live device IDs for distinct configured jobs. See `LIVE_PREVIEW.md` for the live fields and options. The live topics never trigger the completion automation.
 
 No real broker, HA instance, cloud service or production data was used for verification. Offline tests cover the actual publisher subprocesses using fake Paho helpers and execute the real application against a fake rclone executable.
 
@@ -100,10 +94,14 @@ The current completion module still matches the supplied `mqtt_status.py` byte-f
 
 The rclone automation preserves its dry-run guard, strict success/failure checks, Pushover and persistent notification actions. It uses the updated supplied Pushover formatter with a 1,024-character message budget and a title below 250 characters. Only the notification copy is shortened; MQTT report fields are unchanged. It sends no next-job commands. The unrelated chain topics/readiness commands discussed in the template package are not imported into this project.
 
-Manufacturer recognition applies to the live Markdown card, independently of the completion event topic. Both files are preset to `rclone-multithreaded-upload`. The card discovers registry devices through manufacturer and reads real full JSON attributes from the status/last-result roles. No per-job entity list is required. See `TEMPLATE_COMPATIBILITY.md` for the comparison findings.
+Manufacturer recognition applies to the live Markdown card, independently of the completion event topic. The live card selector defaults to `rclone-multithreaded-upload`. The card discovers registry devices through manufacturer and reads real full JSON attributes from the status/last-result roles. No per-job entity list is required. Current fields/options are documented here and in `LIVE_PREVIEW.md`.
 
 ## Parallel progress contract
 
 Standard completion fields and notification automation are unchanged. Live `completed`/`total` now count detailed workflow steps instead of four coarse summary stages per remote. An atomic `details` object contains every destination and its independent step list/current operations/counters. Manufacturer discovery still finds the run device; its status and retained-result attributes contain the full concurrent progress without creating a separate HA device for each worker.
 
-See `PARALLEL_PROGRESS.md`. The MQTT completion publisher remains separate from live preview, and either can be disabled independently. Byte/speed measurements remain Unknown rather than being estimated from selected/planned files.
+See `LIVE_PREVIEW.md`. The MQTT completion publisher remains separate from live preview, and either can be disabled independently. Byte/speed measurements remain Unknown rather than being estimated from selected/planned files.
+
+On termination, final reporting is best-effort within the supervised five-second shutdown window. SIGKILL/forced shutdown cannot guarantee a final packet; heartbeat expiry still indicates loss of live updates. See [PROCESS_LIFECYCLE.md](PROCESS_LIFECYCLE.md).
+
+The single completion example file, `payload-examples.json`, contains `success` and `failure` objects. Each value is a separate valid completion packet; the outer wrapper is only for grouping the examples. The examples use one destination to keep them readable, while the producer supports any configured destination count. The separate `live-payload-examples.json` is one complete three-destination running packet. Neither sample is a configuration file or automatically loaded by the app.

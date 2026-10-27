@@ -5,10 +5,11 @@ from datetime import datetime, timezone
 import json
 from pathlib import Path
 
+from .mqtt_status import MQTTConfig
 from . import APPLICATION_NAME
 from .ha_live_preview import LiveConfig, make_device_id
 
-from .models import DirectoryCleanupRule, MqttConfig, UploadDirectory
+from .models import DirectoryCleanupRule, UploadDirectory
 from .state import STATE
 from .utils import (
     normalize_relative_path,
@@ -95,30 +96,6 @@ def optional_non_negative_int(
     return value
 
 
-def optional_int_in_range(
-    section_name: str,
-    config: dict,
-    key: str,
-    default: int,
-    minimum: int,
-    maximum: int,
-) -> int:
-    """Read an integer constrained to an inclusive range."""
-    if key not in config:
-        return default
-    value = config[key]
-    if (
-        isinstance(value, bool)
-        or not isinstance(value, int)
-        or value < minimum
-        or value > maximum
-    ):
-        raise ValueError(
-            f"{section_name}.{key} must be an integer between {minimum} and {maximum}"
-        )
-    return value
-
-
 def optional_positive_int_or_none(section_name: str, config: dict, key: str) -> int | None:
     if key not in config or config[key] is None:
         return None
@@ -138,14 +115,26 @@ def optional_string_list(section_name: str, config: dict, key: str) -> list[str]
     return value
 
 
+ROOT_OPTIONS = {
+    "script_name", "comment", "completion", "live", "upload_directories",
+    "delete_min_age", "thread_limits", "lock_file", "delete_list_dir", "sleep_after_step",
+}
+THREAD_OPTIONS = {"upload_threads", "cleanup_threads", "remote_quota_cleanup_threads", "trash_cleanup_threads"}
+
+
+def reject_unknown_options(section: str, raw: dict, allowed) -> None:
+    """Reject unsupported keys so obsolete settings and typos cannot disable safeguards."""
+    unknown = set(raw) - set(allowed)
+    if unknown:
+        raise ValueError(f"{section}: unknown option(s): {', '.join(sorted(unknown))}")
+
+
 def _reporting_config(section: str, raw: dict, model, config_dir: Path):
     """Validate template settings and resolve TLS files beside the JSON config."""
     if not isinstance(raw, dict):
         raise ValueError(f"{section} must be an object")
     values = dict(raw)
-    unknown = set(values) - {item.name for item in fields(model)}
-    if unknown:
-        raise ValueError(f"{section}: unknown option(s): {', '.join(sorted(unknown))}")
+    reject_unknown_options(section, values, (item.name for item in fields(model)))
     for key in ("ca_certs", "certfile", "keyfile"):
         value = values.get(key)
         if isinstance(value, str) and value:
@@ -157,38 +146,9 @@ def _reporting_config(section: str, raw: dict, model, config_dir: Path):
         raise ValueError(f"{section}.{error}") from error
 
 
-def parse_mqtt_config(config: dict, config_dir: Path = Path(".")) -> MqttConfig:
-    """Canonical template completion section, with a legacy mqtt adapter."""
-    if "completion" in config and "mqtt" in config:
-        raise ValueError("Use completion or legacy mqtt, not both")
-    if "mqtt" not in config:
-        return _reporting_config("completion", config.get("completion", {}), MqttConfig, config_dir)
-    raw = config["mqtt"]
-    if not isinstance(raw, dict):
-        raise ValueError("mqtt must be an object")
-    raw = dict(raw)
-    # Validate historical options before translating. The template always uses
-    # non-retained events and verified TLS; unsupported behavior is explicit.
-    for key in ("retain", "tls_insecure"):
-        if optional_bool("mqtt", raw, key, False):
-            raise ValueError(f"mqtt.{key}=true is incompatible with the completion template")
-        raw.pop(key, None)
-    optional_int_in_range("mqtt", raw, "keepalive", 60, 1, 65535)
-    raw.pop("keepalive", None)  # Paho's publishing helper owns keepalive now.
-    if "publish_timeout" in raw:
-        if "timeout" in raw:
-            raise ValueError("mqtt: use timeout or publish_timeout, not both")
-        raw["timeout"] = raw.pop("publish_timeout")
-    for key in ("host", "client_id"):
-        if raw.get(key, "") is None:
-            raw[key] = ""
-    for key in ("username", "password"):
-        if raw.get(key) == "":
-            raw[key] = None
-    # Keep the former implicit topic/QoS for legacy configs only.
-    raw.setdefault("topic", "rclone-multithreaded-upload/result")
-    raw.setdefault("qos", 1)
-    return _reporting_config("mqtt", raw, MqttConfig, config_dir)
+def parse_completion_config(config: dict, config_dir: Path = Path(".")) -> MQTTConfig:
+    """Parse only the current completion section and resolve its TLS paths."""
+    return _reporting_config("completion", config.get("completion", {}), MQTTConfig, config_dir)
 
 
 def parse_live_config(config: dict, config_path: Path) -> LiveConfig:
@@ -218,6 +178,7 @@ def parse_cleanup_rules(
         if not isinstance(raw_rule, dict):
             raise ValueError(f"{rule_name} must be an object")
 
+        reject_unknown_options(rule_name, raw_rule, (item.name for item in fields(DirectoryCleanupRule)))
         path = require_string(rule_name, raw_rule, "path")
         normalized_path = normalize_relative_path(path)
         if normalized_path in seen_paths:
@@ -265,6 +226,7 @@ def parse_upload_directories(config: dict) -> list[UploadDirectory]:
         if not isinstance(raw_upload, dict):
             raise ValueError(f"{section_name} must be an object")
 
+        reject_unknown_options(section_name, raw_upload, (item.name for item in fields(UploadDirectory)))
         local_path = require_string(section_name, raw_upload, "local_path")
         remote_path = require_string(section_name, raw_upload, "remote_path")
         previous_index = seen_remote_paths.get(remote_path)
@@ -370,12 +332,7 @@ def load_config(config_path_text: str):
     config_path = Path(config_path_text).expanduser()
     config = load_json_config(config_path)
 
-    if "directory_cleanup_rules" in config:
-        raise ValueError(
-            "Top-level directory_cleanup_rules is no longer supported. "
-            "Move each rule into cleanup_rules inside the upload_directories "
-            "entry for the remote it should clean."
-        )
+    reject_unknown_options("root", config, ROOT_OPTIONS)
 
     uploads = parse_upload_directories(config)
     script_name = optional_string(
@@ -383,7 +340,7 @@ def load_config(config_path_text: str):
     )
     if script_name is None:
         raise ValueError("root.script_name must be a non-empty string")
-    mqtt_config = parse_mqtt_config(config, config_path.resolve().parent)
+    completion_config = parse_completion_config(config, config_path.resolve().parent)
     live_config = parse_live_config(config, config_path)
     comment = config.get("comment", "")
     if not isinstance(comment, str):
@@ -400,6 +357,8 @@ def load_config(config_path_text: str):
     thread_limits = config.get("thread_limits", {})
     if not isinstance(thread_limits, dict):
         raise ValueError("thread_limits must be an object")
+
+    reject_unknown_options("thread_limits", thread_limits, THREAD_OPTIONS)
 
     upload_threads = optional_non_negative_int(
         "thread_limits", thread_limits, "upload_threads", STATE.upload_threads
@@ -439,7 +398,7 @@ def load_config(config_path_text: str):
     assert delete_list_dir_text is not None
 
     STATE.script_name = script_name
-    STATE.mqtt = mqtt_config
+    STATE.completion = completion_config
     STATE.live_config = live_config
     STATE.comment = comment
     STATE.upload_directories = uploads

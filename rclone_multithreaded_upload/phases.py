@@ -1,10 +1,11 @@
 """Barriered per-remote cleanup, trash, upload, and verification phase runners."""
 
-from concurrent.futures import ThreadPoolExecutor, as_completed
-import time
+from concurrent.futures import as_completed
+from .process_lifecycle import StopAwareExecutor as ThreadPoolExecutor, wait_or_cancel
 
 from .progress import step
-from .cleanup import cleanup_one_trash_remote, execute_delete_plan
+from .cleanup import cleanup_one_trash_remote
+from .delete_plan import execute_delete_plan
 from .models import CleanupTarget, UploadDirectory
 from .output import print_job_block, print_step
 from .planning import (
@@ -128,8 +129,7 @@ def prepare_one_remote_for_upload(
         selected_file_count = len(selected_upload_files)
         skipped_file_count = local_file_count - selected_file_count
         skipped_bytes = local_upload_bytes - selected_upload_bytes
-        with STATE.reserved_upload_bytes_lock:
-            STATE.reserved_upload_bytes[upload.remote_path] = selected_upload_bytes
+        with STATE.planned_upload_files_lock:
             STATE.planned_upload_files[upload.remote_path] = tuple(
                 file.path for file in selected_upload_files
             )
@@ -188,7 +188,7 @@ def pre_upload_trash_cleanup_one_remote(
             f"Preparation/trash cleanup complete; sleeping {STATE.sleep_after_step}s before upload barrier",
         )
         with step(upload.remote_path, "pre_delay"):
-            time.sleep(STATE.sleep_after_step)
+            wait_or_cancel(STATE.sleep_after_step)
 
     return True
 
@@ -198,8 +198,7 @@ def run_reservation_and_upload_phase(
 ) -> bool:
     """Run PREPARE -> TRASH CLEANUP -> UPLOAD with global barriers and per-remote failure isolation."""
     clear_local_size_cache()
-    with STATE.reserved_upload_bytes_lock:
-        STATE.reserved_upload_bytes.clear()
+    with STATE.planned_upload_files_lock:
         STATE.planned_upload_files.clear()
     failed = False
 

@@ -1,4 +1,9 @@
-*.json 
-rclone_multithreaded_upload/__pycache__/
+*.json
+__pycache__/
+*.py[cod]
 
 !config.example.json
+!rclone-cctv-config.example.json
+!payload-examples.json
+!live-payload-examples.json
+!RELEASE_MANIFEST.json

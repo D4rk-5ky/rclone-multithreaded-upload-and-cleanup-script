@@ -1,14 +1,10 @@
-"""Combined planned deletion execution and optional backend trash cleanup."""
+"""Optional backend trash cleanup."""
 
 from .progress import observe_step, skip_step
 from .commands import run_command
-from .delete_plan import execute_delete_plan
-from .models import RemoteDeletePlan, UploadDirectory
+from .models import UploadDirectory
 from .output import print_job_block
 from .results import command_error_summary, record_stage_failure, script_managed_trash_used
-
-
-__all__ = ["execute_delete_plan", "cleanup_one_trash_remote"]
 
 
 @observe_step(lambda args: "post_trash" if args["phase_name"].startswith("POST-UPLOAD") else "pre_trash")

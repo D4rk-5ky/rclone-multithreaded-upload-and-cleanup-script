@@ -35,7 +35,7 @@ def record_stage_success(remote_path: str, stage_name: str):
         if stage.status != "FAILED":
             stage.status = "SUCCESS"
 
-    refresh_live(STATE.run_results[remote_path].name)
+    refresh_live()
 
 
 def record_stage_failure(remote_path: str, stage_name: str, error: str):

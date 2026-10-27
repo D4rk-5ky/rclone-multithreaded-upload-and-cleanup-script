@@ -46,30 +46,25 @@ def build_result_payload(exit_code: int) -> dict:
         error_message="\n".join(combined_errors) if exit_code != 0 else "",
         stderr_text=STATE.stderr_tail, warning=any(row["status"] == "skipped" for row in remotes),
         dry_run=False, command=JOB, comment=STATE.comment, version=VERSION, run_id=STATE.run_id,
-        extra={"event": "rclone_multithreaded_upload_result", "script_name": STATE.script_name,
-               "application": JOB, "application_version": VERSION,
+        extra={"event": "rclone_multithreaded_upload_result",
                "failed_remotes": failed_remotes, "remotes": remotes,
                "progress": {key: value for key, value in progress.items() if key != "remote_jobs"}},
     )
 
 
-def publish_result_payload(payload: dict):
-    return publish_report(STATE.mqtt, payload)
-
-
 def publish_final_result(exit_code: int) -> bool | None:
     """Best-effort completion delivery, independent of live monitoring/job outcome."""
-    if not STATE.mqtt.enabled:
+    if not STATE.completion.enabled:
         return None
     try:
-        result = publish_result_payload(build_result_payload(exit_code))
+        result = publish_report(STATE.completion, build_result_payload(exit_code))
         if result.status == "failed":
             print_error(f"MQTT completion delivery failed: {result.reason}")
             return False
         if result.status == "skipped":
             print_step(f"MQTT completion skipped: {result.reason}")
             return None
-        print_step(f"MQTT result published for script '{STATE.script_name}' to {STATE.mqtt.topic}")
+        print_step(f"MQTT result published for script '{STATE.script_name}' to {STATE.completion.topic}")
         return True
     except Exception:
         print_error("MQTT completion reporting failed; preserving the rclone job exit code")
