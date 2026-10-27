@@ -1,5 +1,6 @@
 """Final per-remote verification from one recursive snapshot."""
 
+from .progress import observe_step
 from .models import CleanupTarget, RemoteSnapshot, UploadDirectory
 from .output import print_job_block
 from .remote_files import (
@@ -11,6 +12,7 @@ from .results import record_stage_failure
 from .utils import format_bytes, parse_size_to_bytes
 
 
+@observe_step("verification")
 def verify_upload_snapshot(
     job_number: int,
     upload: UploadDirectory,

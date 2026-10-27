@@ -155,8 +155,9 @@ class LifecycleTests(unittest.TestCase):
                         final = finals[0]
                         self.assertTrue(final['retain'])
                         self.assertEqual(final['payload']['status'], 'success')
-                        self.assertEqual(final['payload']['completed'], 4)
-                        self.assertEqual(final['payload']['total'], 4)
+                        self.assertEqual(final['payload']['completed'], final['payload']['total'])
+                        self.assertEqual(final['payload']['total'], 10)
+                        self.assertEqual(final['payload']['details']['completed_stages'], 4)
                         self.assertEqual(final['payload']['progress_percent'], 100)
                         self.assertEqual(final['payload']['successful_dataset_count'], 1)
                         self.assertIsNone(final['payload']['transferred_bytes'])
@@ -233,7 +234,8 @@ class ProgressTests(unittest.TestCase):
                 for job in jobs:
                     job.result()
             self.assertEqual(counts, sorted(counts))
-            self.assertEqual(counts[-1], 48)
+            self.assertEqual(counts[-1], 0)  # Summary events do not invent observed work.
+            self.assertEqual(STATE.live_preview.snapshot()['details']['completed_stages'], 48)
             self.assertEqual(STATE.live_preview.snapshot()['successful_dataset_count'], 12)
 
     def test_diagnostics_are_bounded_and_redacted_in_both_channels(self):

@@ -10,6 +10,28 @@ Rollover rule:
 
 `0.0.100` is not used.
 
+## 0.0.31
+
+Concurrent per-destination workflow progress and whole-run aggregation.
+
+### Code
+
+- Incremented the application version from 0.0.30 to 0.0.31.
+- Added StepRunResult and per-remote observation/diagnostic fields, plus progress.py for config-derived step plans, thread-safe monotonic observations, worker-local diagnostic routing, final settlement and detached snapshots.
+- Initialized detailed plans through the existing run-result/cleanup-target builders. Added observer-only operation decorators and contexts for snapshots, each cleanup rule, reservation, delete plans, trash cleanup, wait, upload and final verification. No-op/blocked operations have explicit skip reasons.
+- Kept the existing four stage results and all prerequisite/barrier/command decisions. Stage failures annotate active observations and skip only remaining steps in that stage; unrelated destinations and permitted post-cleanup continue.
+- Changed live generic counters to detailed steps and added atomic details.remote_jobs, independent destination totals/current operations, all-active-worker summary and per-destination stderr tails. Added per-cleanup-path pre/post planning counters as non-duplicating views of the same steps.
+- Extended the supplied live module only with optional JSON-object details validation/detachment/merge. Standard core fields, manufacturer discovery, role attributes, retention and timeout-bound workers remain intact. Completion template is unchanged; completion adapter adds progress extensions without changing standard outcome fields.
+- Added final unresolved-step settlement and startup/config-validation overall/per-destination counts. Monitor failures remain non-fatal to actual work.
+
+### Card, documentation and tests
+
+- Extended the manufacturer Markdown/YAML card with per-destination counts, active operations, complete step table and diagnostics, with generic-job fallback. Preserved exact manufacturer/role recognition. Supplied a separate updated card preset to the user's custom manufacturer.
+- Updated current guides, function/command map, version history and examples. Added PARALLEL_PROGRESS.md and synthetic JSON/rendered examples. Config options/settings and the owner's exact disclaimer remain intact.
+- Added concurrent real-operation observer tests holding three uploads and three trash cleanups open, isolated diagnostic routing, independent denominators, all-destination rendering, shared-source cache visibility, monotonic aggregates, skip/failure/interruption states and non-fatal monitoring.
+- Updated earlier coarse-progress assertions to detailed totals while retaining legacy stage checks. Real fake-rclone/publisher integrations verify complete detailed snapshots and unchanged three-listing/barrier behavior.
+- Compared original operation ASTs after removing observer-only additions; operation decisions/bodies match. Protected config/command/lock/backend/listing/target/util modules remain byte-identical. Full checks, limits, clean ZIP manifest and hashes are recorded in verification_report.txt.
+
 ## 0.0.30
 
 Latest supplied MQTT-template compatibility audit and bounded HA/Pushover notifications.

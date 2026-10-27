@@ -228,20 +228,26 @@ class CardTests(unittest.TestCase):
                 STATE.live_preview = live
                 live.start()
                 live.update(phase='reservation_and_upload', current_item='cloud:archive')
+                from rclone_multithreaded_upload.progress import step
+                with step('cloud:archive', 'pre_snapshot'):
+                    pass
                 record_stage_success('cloud:archive', 'reservation')
                 running = live.snapshot()
                 self.add('camera', name='Camera cloud archive', live=running, renamed=True)
                 rendered = self.render()
                 self.assertIn('Camera cloud archive — RUNNING', rendered)
-                self.assertIn('**Items:** 1 / 4 completed', rendered)
-                self.assertIn('25.0%', rendered)
-                self.assertIn('**Current:** Camera cloud archive', rendered)
+                self.assertIn('**Steps:** 1 / 10 settled', rendered)
+                self.assertIn('10.0%', rendered)
+                self.assertIn('**Current:** Waiting for the next phase', rendered)
                 if failed:
                     record_stage_failure('cloud:archive', 'upload', 'Rclone quota failed')
                 else:
                     record_stage_success('cloud:archive', 'upload')
                 for stage in ('post_cleanup', 'final_quota'):
                     record_stage_success('cloud:archive', stage)
+                for key in STATE.run_results['cloud:archive'].steps:
+                    with step('cloud:archive', key):
+                        pass
                 refresh_live()
                 live.finish(1 if failed else 0, error='Rclone quota failed' if failed else '')
                 final = live.snapshot()
@@ -249,7 +255,7 @@ class CardTests(unittest.TestCase):
                 self.add('camera', name='Camera cloud archive', live=final, last=final, expired=True, renamed=True)
                 rendered = self.render()
                 self.assertIn('— FAILURE' if failed else '— SUCCESS', rendered)
-                self.assertIn('**Items:** 4 / 4 completed', rendered)
+                self.assertIn('**Steps:** 10 / 10 settled', rendered)
                 self.assertIn('/srv/cameras → cloud:archive', rendered)
                 self.assertIn('**Transferred:** Unknown', rendered)
                 self.assertIn('**Exit code:** 1' if failed else '**Exit code:** 0', rendered)

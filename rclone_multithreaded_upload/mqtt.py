@@ -5,6 +5,7 @@ from .mqtt_status import build_report, publish_report
 from .output import print_error, print_step
 from .reporting import JOB, sanitize
 from .results import remote_result_label
+from .progress import progress_snapshot_locked
 from .state import STATE
 
 
@@ -20,6 +21,8 @@ def build_result_payload(exit_code: int) -> dict:
     """Template fields plus the existing rclone per-remote diagnostics."""
     remotes, combined_errors, failed_remotes = [], [], []
     with STATE.run_results_lock:
+        progress = progress_snapshot_locked()
+        progress_by_remote = {row["destination"]: row for row in progress["remote_jobs"]}
         for result in STATE.run_results.values():
             result_label = remote_result_label(result)
             errors = _stage_errors(result)
@@ -32,6 +35,7 @@ def build_result_payload(exit_code: int) -> dict:
                 "stages": {key: getattr(result, key).status for key in
                            ("reservation", "upload", "post_cleanup", "final_quota")},
                 "errors": errors,
+                "progress": progress_by_remote[result.remote_path],
             })
     if STATE.run_error:
         combined_errors.append(sanitize(STATE.run_error))
@@ -44,7 +48,8 @@ def build_result_payload(exit_code: int) -> dict:
         dry_run=False, command=JOB, comment=STATE.comment, version=VERSION, run_id=STATE.run_id,
         extra={"event": "rclone_multithreaded_upload_result", "script_name": STATE.script_name,
                "application": JOB, "application_version": VERSION,
-               "failed_remotes": failed_remotes, "remotes": remotes},
+               "failed_remotes": failed_remotes, "remotes": remotes,
+               "progress": {key: value for key, value in progress.items() if key != "remote_jobs"}},
     )
 
 

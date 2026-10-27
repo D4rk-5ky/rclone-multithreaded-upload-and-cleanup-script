@@ -106,9 +106,13 @@ Stores `PENDING`, `SUCCESS`, `FAILED`, or `SKIPPED` plus retained error text for
 
 Why: failures must survive until the final summary even when later stages continue.
 
+### `StepRunResult`
+
+Stores one planned operation's label, legacy stage, kind, observation status, reason/error and UTC start/finish times. It never controls execution. A RemoteRunResult owns an insertion-ordered map of these objects so its denominator is fixed and its history is retained independently of parallel workers.
+
 ### `RemoteRunResult`
 
-Contains the four final summary groups for one remote: reservation, upload, post cleanup, final quota. It also retains three internal trash-activity markers: successful reservation-plan trash deletion, an actually started trash-mode upload `sync`, and successful post-cleanup-plan trash deletion.
+Contains detailed steps and an independent stderr tail as well as the four final summary groups for one remote: reservation, upload, post cleanup, final quota. It also retains three internal trash-activity markers: successful reservation-plan trash deletion, an actually started trash-mode upload `sync`, and successful post-cleanup-plan trash deletion.
 
 Why: one failed remote can be reported without losing status for the other remotes, and later trash cleanup can distinguish script-managed trash activity from hard-delete-only work.
 
@@ -695,7 +699,7 @@ Why: inheritance is resolved once before worker execution, and every generated t
 
 ### `initialize_run_results()`
 
-Creates fresh `RemoteRunResult` objects for every configured upload destination.
+Creates fresh `RemoteRunResult` objects for every configured upload destination and derives its fixed detailed-step plan using the existing effective cleanup-target builder.
 
 Why: a new run must not inherit prior stage/error state.
 
@@ -713,13 +717,13 @@ Why: a later success must never erase an earlier failure.
 
 ### `record_stage_failure(remote_path, stage_name, error)`
 
-Marks failure and appends deduplicated error text.
+Marks failure and appends deduplicated error text. After releasing the results lock, annotates any active detailed operation and skips unresolved observations only within that stage. This reflects the existing stage decision and does not add an eligibility decision.
 
 Why: all relevant failure causes should survive to the final report.
 
 ### `record_stage_skipped(remote_path, stage_name)`
 
-Changes only a still-pending stage to `SKIPPED`.
+Changes only a still-pending stage to `SKIPPED` and settles its pending detailed observations with a prerequisite-skip reason.
 
 Why: failed prerequisites should visibly prevent dependent work without overwriting existing status.
 
@@ -787,7 +791,7 @@ Why: Structured remote diagnostics must survive without exposing known credentia
 
 Snapshot per-remote results, aggregate errors, and call the existing template builder with the authoritative job code and rclone extensions.
 
-Why: Completion fields stay template-compatible without duplicating the template serializer or losing rclone details.
+Why: Completion fields stay template-compatible without duplicating the template serializer or losing rclone details. Standard fields remain authoritative; top-level progress and per-remote progress add the detailed final snapshot.
 
 ### `publish_result_payload(...)`
 
@@ -879,7 +883,7 @@ Why: A frozen executable can safely re-execute itself as a publisher before argu
 
 ## `ha_live_preview.py`
 
-Unmodified supplied template 1.2.0: independent manufacturer-aware config, local thread-safe progress, heartbeat, discovery, retained final outcome and killable MQTT subprocesses. This module imports no completion module. See `LIVE_PREVIEW.md` for the rclone measurement unit and every option.
+Supplied template 1.2.0 with a local optional JSON-object details extension: independent manufacturer-aware config, local thread-safe progress, heartbeat, discovery, retained final outcome and killable MQTT subprocesses. This module imports no completion module. See `LIVE_PREVIEW.md` for the rclone measurement unit and every option.
 
 ### `_now(...)`
 
@@ -955,7 +959,7 @@ Why: Disabled monitoring must not import Paho or start a publisher, and duplicat
 
 ### `LivePreview.update(...)`
 
-Validate and detach supplied progress fields, merge them under lock, derive percentage/counts, and wake the daemon.
+Validate and detach supplied progress fields and the optional JSON-object details, merge them atomically under lock, derive percentage/counts, and wake the daemon. Details carry application extensions without replacing standard fields.
 
 Why: Job threads must update local memory quickly while keeping counters and typed JSON truthful.
 
@@ -1007,6 +1011,88 @@ Intercept only the exact private live-worker invocation, validate stdin, lazily 
 
 Why: The worker must never enter the job CLI or run uploads; ordinary invocations pass through unchanged.
 
+## `progress.py`
+
+Observational metadata only. Thread limits, eligibility, command arguments and barriers remain owned by the original application. CURRENT_REMOTE is a ContextVar, not one shared mutable current-worker name.
+
+### `rule_step_id(...)`
+
+Compose a stable key from pre/post planning phase and the effective owned rule path.
+
+Why: The same cleanup path is observed separately before and after uploads without mixing destinations.
+
+### `plan_steps(...)`
+
+Build each destination's ordered plan from existing quota, rule, trash and delay settings.
+
+Why: The overall denominator must be the sum of truthful per-destination plans, rather than assuming every destination has four identical tasks.
+
+### `plan_steps.add(...)`
+
+Add one typed observation with its label, legacy stage and kind.
+
+Why: The builder should initialize every step consistently without duplicate control logic.
+
+### `set_step(...)`
+
+Update one observation under the results lock, stamp real start/finish times, keep terminal observations immutable and refresh live data after unlocking.
+
+Why: Concurrent workers must not overwrite each other or erase a failure; reporting errors must not replace a real job result.
+
+### `step(...)`
+
+Set the worker-local destination context, observe RUNNING/terminal state around real execution and re-raise the original BaseException unchanged.
+
+Why: Captured diagnostics need correct ownership and failures/interrupts need truthful observation without changing execution behavior.
+
+### `observe_step(...)`
+
+Return a thin observer decorator for an existing operation, using its original argument signature and optional None-failure semantics.
+
+Why: Reuse the original implementation and return values instead of introducing another upload/cleanup path.
+
+### `observe_step.decorate(...)`
+
+Capture the original operation signature and construct its wrapped observer.
+
+Why: Positional/keyword upload arguments must resolve to the same destination for every existing caller.
+
+### `observe_step.decorate.observed(...)`
+
+Bind original arguments, enter the step context, call the original function exactly once and observe False/optional-None results before returning unchanged.
+
+Why: Monitoring must accurately represent operations while preserving their actual result or exception.
+
+### `skip_step(...)`
+
+Record a terminal skipped observation with its actual no-op/prerequisite reason.
+
+Why: A successful no-op should not be falsely presented as a file transfer or deletion.
+
+### `settle_stage(...)`
+
+Mirror an existing failed/skipped stage by marking active observations and skipping remaining ones in that stage only. Errors outside an observed operation stay on the destination/stage.
+
+Why: Do not fabricate execution of an unstarted step, skip allowed post-cleanup, or cancel another destination.
+
+### `finish_steps(...)`
+
+Settle any unresolved active/pending observations after the job ends, preserving interruption and using skipped for unreached work.
+
+Why: Final details must not leave ghost running workers or invent successful work.
+
+### `remote_progress(...)`
+
+Snapshot a destination's complete ordered step table, counts/current operations, per-cleanup-path pre/post counters, legacy stages, diagnostics and error flags while the caller owns the results lock.
+
+Why: Each destination needs its own consistent view, independent of the last reporting worker.
+
+### `progress_snapshot_locked(...)`
+
+Build all destination snapshots once and sum their fixed totals and settled/running/failure/skip counts, retaining the legacy four-stage counters.
+
+Why: One atomic details object must agree with the whole-run counters and report every active worker.
+
 ## `reporting.py`
 
 `start_reporting()` creates a fresh run ID and starts an enabled live monitor after the caller owns the lock. `update_live()` applies global phase/current-remote updates. `refresh_live()` snapshots stage outcomes under locks, counts settled stages and maps local/remote jobs to the template's outcome arrays. The adapter lock orders concurrent snapshots and updates to prevent progress moving backward.
@@ -1023,13 +1109,13 @@ Why: Forwarding command errors to HA should not unnecessarily expose known crede
 
 ### `append_diagnostics(...)`
 
-Sanitize and append captured output to the shared bounded stderr tail and enabled live monitor.
+Sanitize and append captured output to the shared bounded stderr tail, the current worker destination's independent tail via CURRENT_REMOTE, and the enabled live monitor. Refresh detached details so the card sees that destination's output.
 
 Why: Both channels should show consistent bounded diagnostics; a live update exception must not fail the job.
 
 ### `start_reporting(...)`
 
-Reset report state, assign one new run ID, and start an enabled live monitor after the caller owns the job lock.
+Reset report state, assign one new run ID, initialize detailed totals in the enabled monitor before its first publisher batch, and start it only after the caller owns the job lock.
 
 Why: Both channels need the same job identity and must not start duplicate reporting for an existing-lock skip.
 
@@ -1041,7 +1127,7 @@ Why: Progress observations must never become a prerequisite for upload/cleanup w
 
 ### `refresh_live(...)`
 
-Serialize concurrent snapshots under the adapter/result locks, count settled remote stages, and map real remote outcomes to live lists.
+Serialize concurrent snapshots under adapter/result locks, use progress_snapshot_locked for detailed counters and all active destinations, and map the authoritative legacy outcomes to live result lists.
 
 Why: Counters must not move backward due to racing workers; only actual outcomes should classify success, failure or skipped.
 
@@ -1120,7 +1206,7 @@ Top-level application orchestration:
 7. run barriered pre-upload preparation/trash/upload;
 8. run barriered post-upload cleanup/trash;
 9. run final verification;
-10. aggregate overall status, mark unresolved stages skipped, and print final result;
+10. aggregate overall status, mark unresolved stages skipped, settle unobserved detailed steps honestly, and print final result;
 11. finalize enabled live preview and independently publish the template completion result;
 12. release the owned lock and return the rclone/cleanup run exit code.
 
@@ -2337,3 +2423,148 @@ Check completion short stderr is not marked as truncated.
 
 Why: Verify this notification/card contract using the actual templates and typed completion reports, without production services.
 
+
+## `tests/test_parallel_progress.py`
+
+Offline concurrent-observer regression checks.
+
+### `ParallelProgressTests.test_each_cleanup_rule_has_independent_pre_and_post_planning_counts(...)`
+
+Check that each configured cleanup path has its own two planning states and count, that completing one does not advance the others, and that derived cleanup views do not inflate run totals.
+
+Why: the user needs individual cleanup progress in addition to per-destination and whole-run progress.
+
+### `ParallelProgressTests.setUp(...)`
+
+Create isolated actual models/plans and a disabled local monitor for three differently configured destinations.
+
+Why: Parallel tests require independent state and realistic denominators without a broker.
+
+### `ParallelProgressTests.tearDown(...)`
+
+Close the monitor, remove temporary source data and restore runtime state/cache.
+
+Why: Concurrent fixtures must not leak state to other tests.
+
+### `ParallelProgressTests.test_each_destination_total_depends_on_its_own_config_and_overall_is_sum(...)`
+
+Check each destination total depends on its own config and overall is sum.
+
+Why: Verify real tracker, operation observers, worker routing or automatic card behavior without production services.
+
+### `ParallelProgressTests._hold_three_operations(...)`
+
+Hold three real upload or trash-cleanup functions open through patched subprocess boundaries, inspect simultaneous observations/diagnostics and optionally render the real card.
+
+Why: Prove actual decorators and worker context report all destinations at once, not merely a synthetic progress dict.
+
+### `ParallelProgressTests._hold_three_operations.hold(...)`
+
+Append worker-owned diagnostics, signal entry and wait on an independently released event.
+
+Why: The test must be able to finish one destination while the other two remain running.
+
+### `ParallelProgressTests._hold_three_operations.stream(...)`
+
+Simulate one upload subprocess boundary while the real observed upload function remains active.
+
+Why: No production transfer is needed to exercise real concurrent upload reporting.
+
+### `ParallelProgressTests._hold_three_operations.command(...)`
+
+Simulate backend trash cleanup while its real observed function remains active.
+
+Why: No backend trash is emptied to exercise simultaneous cleanup reporting.
+
+### `ParallelProgressTests.test_all_three_actual_upload_workers_are_reported_at_once(...)`
+
+Check all three actual upload workers are reported at once.
+
+Why: Verify real tracker, operation observers, worker routing or automatic card behavior without production services.
+
+### `ParallelProgressTests.test_all_three_actual_trash_cleanup_workers_are_reported_at_once(...)`
+
+Check all three actual trash cleanup workers are reported at once.
+
+Why: Verify real tracker, operation observers, worker routing or automatic card behavior without production services.
+
+### `ParallelProgressTests.test_manufacturer_card_shows_every_parallel_destination_and_its_steps(...)`
+
+Check manufacturer card shows every parallel destination and its steps.
+
+Why: Verify real tracker, operation observers, worker routing or automatic card behavior without production services.
+
+### `ParallelProgressTests.test_failed_preparation_skips_its_dependents_but_leaves_post_cleanup_available(...)`
+
+Check failed preparation skips its dependents but leaves post cleanup available.
+
+Why: Verify real tracker, operation observers, worker routing or automatic card behavior without production services.
+
+### `ParallelProgressTests.test_interruption_preserves_active_step_outcome_and_never_leaves_ghost_workers(...)`
+
+Check interruption preserves active step outcome and never leaves ghost workers.
+
+Why: Verify real tracker, operation observers, worker routing or automatic card behavior without production services.
+
+### `ParallelProgressTests.test_zero_selected_files_are_skipped_without_a_transfer_but_keep_legacy_success(...)`
+
+Check zero selected files are skipped without a transfer but keep legacy success.
+
+Why: Verify real tracker, operation observers, worker routing or automatic card behavior without production services.
+
+### `ParallelProgressTests.test_live_details_are_validated_detached_and_retained_in_completion_extensions(...)`
+
+Check live details are validated detached and retained in completion extensions.
+
+Why: Verify real tracker, operation observers, worker routing or automatic card behavior without production services.
+
+### `ParallelProgressTests.test_concurrent_step_updates_keep_all_aggregate_and_destination_counts_monotonic(...)`
+
+Check concurrent step updates keep all aggregate and destination counts monotonic.
+
+Why: Verify real tracker, operation observers, worker routing or automatic card behavior without production services.
+
+### `ParallelProgressTests.test_concurrent_step_updates_keep_all_aggregate_and_destination_counts_monotonic.capture(...)`
+
+Capture actual monitor updates and assert core counters equal the sum of destination snapshots.
+
+Why: Every atomic update must stay internally consistent and monotonic under concurrent writers.
+
+### `ParallelProgressTests.test_concurrent_step_updates_keep_all_aggregate_and_destination_counts_monotonic.perform(...)`
+
+Execute one real observation context for a configured step.
+
+Why: The concurrency fixture must exercise the actual locking/snapshot path.
+
+### `ParallelProgressTests.test_shared_local_snapshot_keeps_each_destination_acquisition_step_visible(...)`
+
+Check shared local snapshot keeps each destination acquisition step visible.
+
+Why: Verify real tracker, operation observers, worker routing or automatic card behavior without production services.
+
+### `ParallelProgressTests.test_shared_local_snapshot_keeps_each_destination_acquisition_step_visible.calculate(...)`
+
+Hold the one actual cached local-source calculation open and return a typed snapshot.
+
+Why: Both destinations should show acquisition in progress while source scanning remains single-flight.
+
+### `ParallelProgressTests.test_later_observations_cannot_erase_a_failed_step(...)`
+
+Check later observations cannot erase a failed step.
+
+Why: Verify real tracker, operation observers, worker routing or automatic card behavior without production services.
+
+### `ParallelProgressTests.test_observer_failure_does_not_change_a_real_upload_return_value(...)`
+
+Check observer failure does not change a real upload return value.
+
+Why: Verify real tracker, operation observers, worker routing or automatic card behavior without production services.
+
+
+# Detailed parallel observation hooks
+
+The existing operations are called exactly once with their original arguments. observe_step wraps source acquisition, reservation/quota planning, combined delete plans, trash cleanup, upload and verification. Snapshot and configured wait calls use step contexts. The existing per-target planning loop uses one pre/post step context for each rule. The observer records no-op skips, but introduces no rclone invocation or new eligibility decision. Existing global barriers still determine actual concurrency.
+
+The card reads details.remote_jobs under the same manufacturer/role discovery as before. It displays aggregate settled steps plus every destination's counts, all active operation labels, complete table and independent stderr tail. It retains generic item rendering when details are absent. Markdown row whitespace is controlled so step tables remain contiguous. Full details remain in status/retained-result attributes; current_item sensor state may be shortened by HA's existing 255-character template, while attributes/card retain all destinations.
+
+The source safety audit strips only observer additions from ASTs and verifies the original operation bodies/decisions match. Existing fake-rclone tests separately prove command arguments, snapshot counts, file selection, trash behavior and stage barriers remain correct.

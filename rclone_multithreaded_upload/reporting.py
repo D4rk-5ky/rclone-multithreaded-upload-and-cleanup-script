@@ -6,9 +6,9 @@ import uuid
 from . import APPLICATION_NAME, VERSION
 from .ha_live_preview import LivePreview
 from .output import print_error
+from .progress import STAGES, CURRENT_REMOTE, progress_snapshot_locked
 from .state import STATE
 
-STAGES = ("reservation", "upload", "post_cleanup", "final_quota")
 JOB = APPLICATION_NAME
 
 
@@ -29,11 +29,18 @@ def append_diagnostics(text: str) -> None:
     text = sanitize(text)
     with STATE.reporting_lock:
         STATE.stderr_tail = (STATE.stderr_tail + text)[-4000:]
+        remote = CURRENT_REMOTE.get()
+        if remote is not None:
+            with STATE.run_results_lock:
+                result = STATE.run_results.get(remote)
+                if result is not None:
+                    result.stderr_tail = (result.stderr_tail + text)[-4000:]
         if STATE.live_preview is not None:
             try:
                 STATE.live_preview.append_stderr(text)
             except Exception:
                 print_error("HA live preview diagnostic update failed; continuing the rclone job")
+    refresh_live()
 
 
 def start_reporting() -> None:
@@ -46,8 +53,8 @@ def start_reporting() -> None:
                 STATE.live_config, name=STATE.script_name, job=JOB,
                 version=VERSION, run_id=STATE.run_id,
             )
-            STATE.live_preview.start()
             refresh_live()
+            STATE.live_preview.start()
         except Exception:
             if STATE.live_preview is not None:
                 try:
@@ -76,15 +83,15 @@ def refresh_live(current_item: str | None = None) -> None:
         return
     try:
         with STATE.reporting_lock:
-            completed = 0
             groups = {"successful_datasets": [], "failed_datasets": [], "skipped_datasets": []}
             with STATE.run_results_lock:
-                total = len(STATE.run_results) * len(STAGES)
+                details = progress_snapshot_locked()
+                total = details["total"]
                 sources = {upload.remote_path: upload.local_path for upload in STATE.upload_directories}
                 for result in STATE.run_results.values():
                     stages = [getattr(result, stage) for stage in STAGES]
                     statuses = [stage.status for stage in stages]
-                    completed += sum(status != "PENDING" for status in statuses)
+                    # Summary stages still classify outcomes; detailed observations count progress.
                     row = {"source": sources[result.remote_path], "destination": result.remote_path,
                            "name": result.name}
                     if "FAILED" in statuses:
@@ -95,9 +102,11 @@ def refresh_live(current_item: str | None = None) -> None:
                     elif "PENDING" not in statuses:
                         row["reason"] = "One or more remote stages were skipped"
                         groups["skipped_datasets"].append(row)
-            values = {"completed": completed, "total": total, **groups}
-            if current_item is not None:
-                values["current_item"] = current_item
+            active = [row["name"] + ": " + ", ".join(row["active_steps"]) for row in details["remote_jobs"] if row["running"]]
+            values = {"completed": details["completed"], "total": total, "details": details, **groups,
+                      "current_item": "; ".join(active) if active else ("Waiting for the next phase" if details["completed"] < total else "")}
+            if current_item == "":
+                values["current_item"] = ""
             STATE.live_preview.update(**values)
     except Exception:
         print_error("HA live preview update failed; continuing the rclone job")

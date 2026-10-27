@@ -10,6 +10,7 @@ from .lock import acquire_lock, release_lock, signal_handler
 from .mqtt import build_result_payload, publish_final_result
 from .mqtt_status import run_worker_if_requested as completion_worker
 from .output import print_error, print_step
+from .progress import finish_steps
 from .phases import (
     run_final_verification,
     run_post_upload_cleanup_phase,
@@ -82,6 +83,10 @@ def main() -> int:
         try:
             if exit_code != 0:
                 mark_pending_stages_skipped()
+            try:
+                finish_steps(exit_code, interrupted)
+            except Exception:
+                print_error("Progress finalization failed; preserving the rclone job exit code")
             print_final_run_result(exit_code)
             error_text, warning = STATE.run_error, False
             try:

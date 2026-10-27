@@ -2,6 +2,7 @@
 
 from datetime import datetime, timezone
 
+from .progress import observe_step, step, skip_step, rule_step_id
 from .delete_plan import add_planned_deletion
 from .models import CleanupTarget, RemoteDeletePlan, RemoteSnapshot, UploadDirectory
 from .remote_files import (
@@ -45,63 +46,69 @@ def plan_cleanup_targets(
         age_cutoff = parse_rclone_age_cutoff(STATE.delete_min_age, current_time)
 
     for target in targets:
-        relative_path = relative_cleanup_target_path(upload, target)
+        prefix = "pre" if plan.phase_name == "PRE-UPLOAD" else "post"
+        task_key = rule_step_id(prefix, target.path)
+        with step(upload.remote_path, task_key):
+            if not target.delete_old_files and not (target.delete_excess_files and (target.max_files is not None or target.max_size is not None)):
+                skip_step(upload.remote_path, task_key, "Cleanup actions disabled for this rule")
+            relative_path = relative_cleanup_target_path(upload, target)
 
-        if target.delete_old_files and age_cutoff is not None:
-            aged_files = sorted(
-                (
-                    file
-                    for file in files_below_relative_path(snapshot, relative_path)
-                    if parse_rclone_modtime(file.modified) < age_cutoff
-                ),
+            if target.delete_old_files and age_cutoff is not None:
+                aged_files = sorted(
+                    (
+                        file
+                        for file in files_below_relative_path(snapshot, relative_path)
+                        if parse_rclone_modtime(file.modified) < age_cutoff
+                    ),
+                    key=remote_file_oldest_sort_key,
+                )
+                for file in aged_files:
+                    add_planned_deletion(
+                        plan,
+                        snapshot,
+                        file,
+                        delete_to_trash=target.delete_to_trash,
+                        reason=f"age:{target.path}",
+                    )
+
+            if not target.delete_excess_files:
+                continue
+            if target.max_files is None and target.max_size is None:
+                continue
+
+            files = sorted(
+                files_below_relative_path(snapshot, relative_path),
                 key=remote_file_oldest_sort_key,
             )
-            for file in aged_files:
-                add_planned_deletion(
+            current_files = len(files)
+            current_size = sum(file.size for file in files)
+            max_size_bytes = (
+                parse_size_to_bytes(target.max_size)
+                if target.max_size is not None
+                else None
+            )
+
+            for file in files:
+                too_many_files = (
+                    target.max_files is not None and current_files > target.max_files
+                )
+                too_much_size = (
+                    max_size_bytes is not None and current_size > max_size_bytes
+                )
+                if not too_many_files and not too_much_size:
+                    break
+                if add_planned_deletion(
                     plan,
                     snapshot,
                     file,
                     delete_to_trash=target.delete_to_trash,
-                    reason=f"age:{target.path}",
-                )
-
-        if not target.delete_excess_files:
-            continue
-        if target.max_files is None and target.max_size is None:
-            continue
-
-        files = sorted(
-            files_below_relative_path(snapshot, relative_path),
-            key=remote_file_oldest_sort_key,
-        )
-        current_files = len(files)
-        current_size = sum(file.size for file in files)
-        max_size_bytes = (
-            parse_size_to_bytes(target.max_size)
-            if target.max_size is not None
-            else None
-        )
-
-        for file in files:
-            too_many_files = (
-                target.max_files is not None and current_files > target.max_files
-            )
-            too_much_size = (
-                max_size_bytes is not None and current_size > max_size_bytes
-            )
-            if not too_many_files and not too_much_size:
-                break
-            if add_planned_deletion(
-                plan,
-                snapshot,
-                file,
-                delete_to_trash=target.delete_to_trash,
-                reason=f"limits:{target.path}",
-            ):
-                current_files -= 1
-                current_size -= file.size
+                    reason=f"limits:{target.path}",
+                ):
+                    current_files -= 1
+                    current_size -= file.size
 
 
+@observe_step("post_quota")
 def plan_remote_quota_cleanup(
     upload: UploadDirectory,
     snapshot: RemoteSnapshot,
@@ -131,6 +138,7 @@ def plan_remote_quota_cleanup(
             current_size -= file.size
 
 
+@observe_step("reservation")
 def plan_upload_reservation(
     upload: UploadDirectory,
     snapshot: RemoteSnapshot,

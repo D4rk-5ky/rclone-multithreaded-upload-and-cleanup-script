@@ -3,6 +3,7 @@
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
 
+from .progress import step
 from .cleanup import cleanup_one_trash_remote, execute_delete_plan
 from .models import CleanupTarget, UploadDirectory
 from .output import print_job_block, print_step
@@ -64,7 +65,8 @@ def prepare_one_remote_for_upload(
     targets = cleanup_targets_for_upload(cleanup_directories, upload)
 
     try:
-        pre_snapshot = fetch_remote_snapshot(upload.remote_path)
+        with step(upload.remote_path, "pre_snapshot"):
+            pre_snapshot = fetch_remote_snapshot(upload.remote_path)
         print_snapshot_summary(job_number, "PRE-UPLOAD", upload, pre_snapshot)
     except Exception as error:
         detail = f"Pre-upload remote snapshot failed: {error}"
@@ -185,7 +187,8 @@ def pre_upload_trash_cleanup_one_remote(
             upload.remote_path,
             f"Preparation/trash cleanup complete; sleeping {STATE.sleep_after_step}s before upload barrier",
         )
-        time.sleep(STATE.sleep_after_step)
+        with step(upload.remote_path, "pre_delay"):
+            time.sleep(STATE.sleep_after_step)
 
     return True
 
@@ -304,7 +307,8 @@ def post_cleanup_plan_one_remote(
     """Fetch the post-upload snapshot, plan all cleanup/quota rules, and execute planned deletes."""
     targets = cleanup_targets_for_upload(cleanup_directories, upload)
     try:
-        snapshot = fetch_remote_snapshot(upload.remote_path)
+        with step(upload.remote_path, "post_snapshot"):
+            snapshot = fetch_remote_snapshot(upload.remote_path)
         print_snapshot_summary(job_number, "POST-UPLOAD", upload, snapshot)
         plan, _working_snapshot = build_post_upload_plan(upload, targets, snapshot)
     except Exception as error:
@@ -412,7 +416,8 @@ def verify_one_remote(
     """Fetch one final live snapshot and verify every configured limit for that remote."""
     targets = cleanup_targets_for_upload(cleanup_directories, upload)
     try:
-        snapshot = fetch_remote_snapshot(upload.remote_path)
+        with step(upload.remote_path, "final_snapshot"):
+            snapshot = fetch_remote_snapshot(upload.remote_path)
         print_snapshot_summary(job_number, "FINAL", upload, snapshot)
     except Exception as error:
         detail = f"Final remote snapshot failed: {error}"

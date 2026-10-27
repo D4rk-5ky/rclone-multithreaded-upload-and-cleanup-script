@@ -125,6 +125,19 @@ class StageRunResult:
 
 
 @dataclass
+class StepRunResult:
+    """One observable workflow step; these fields never control execution."""
+
+    label: str
+    stage: str
+    kind: str
+    status: str = "PENDING"
+    error: str = ""
+    started_at: str | None = None
+    finished_at: str | None = None
+
+
+@dataclass
 class RemoteRunResult:
     """Per-remote state retained until FINAL RUN RESULT is printed."""
 
@@ -137,3 +150,5 @@ class RemoteRunResult:
     reservation_trash_deleted: bool = False
     upload_trash_mode_attempted: bool = False
     post_cleanup_trash_deleted: bool = False
+    steps: dict[str, StepRunResult] = field(default_factory=dict)
+    stderr_tail: str = ""

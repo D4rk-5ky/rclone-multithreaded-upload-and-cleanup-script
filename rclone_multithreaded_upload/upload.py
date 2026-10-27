@@ -3,7 +3,8 @@
 import subprocess
 from pathlib import Path
 
-from .reporting import append_diagnostics, update_live
+from .progress import observe_step, skip_step
+from .reporting import append_diagnostics
 from .models import UploadDirectory
 from .output import OUTPUT_LOCK, OUTPUT_SEPARATOR, print_job_block
 from .rclone_backend import get_delete_mode_options
@@ -50,7 +51,6 @@ def run_command_streamed(
         print(OUTPUT_SEPARATOR)
         print(flush=True)
 
-    update_live(current_item=remote_path)
     process = subprocess.Popen(
         command,
         stdout=subprocess.PIPE,
@@ -92,6 +92,7 @@ def write_planned_upload_file_list(
             handle.write(b"\x00")
     return list_path
 
+@observe_step("upload")
 def upload_one_directory(job_number: int, upload: UploadDirectory) -> bool:
     """Upload one local directory to one remote destination."""
     valid, error = validate_local_upload_path(upload)
@@ -113,6 +114,7 @@ def upload_one_directory(job_number: int, upload: UploadDirectory) -> bool:
         planned_files = STATE.planned_upload_files.get(upload.remote_path)
 
     if planned_files is not None and not planned_files:
+        skip_step(upload.remote_path, "upload", "No complete files fit the configured upload budget")
         record_stage_success(upload.remote_path, "upload")
         print_job_block(
             "UPLOAD JOB",

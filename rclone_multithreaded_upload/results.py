@@ -10,6 +10,9 @@ from .state import STATE
 
 def initialize_run_results():
     """Create fresh per-remote stage results for the current run."""
+    from .progress import plan_steps
+    from .targets import build_cleanup_directories
+    targets = build_cleanup_directories()
     with STATE.run_results_lock:
         STATE.run_results.clear()
         for upload in STATE.upload_directories:
@@ -17,6 +20,7 @@ def initialize_run_results():
             STATE.run_results[upload.remote_path] = RemoteRunResult(
                 name=display_name,
                 remote_path=upload.remote_path,
+                steps=plan_steps(upload, [target for target in targets if target.owner_remote_path == upload.remote_path]),
             )
 
 
@@ -42,7 +46,9 @@ def record_stage_failure(remote_path: str, stage_name: str, error: str):
         if cleaned and cleaned not in stage.errors:
             stage.errors.append(cleaned)
 
-    refresh_live(STATE.run_results[remote_path].name)
+    from .progress import settle_stage
+    settle_stage(remote_path, stage_name, failed=True, reason=cleaned)
+    refresh_live()
 
 
 def record_stage_skipped(remote_path: str, stage_name: str):
@@ -51,6 +57,8 @@ def record_stage_skipped(remote_path: str, stage_name: str):
         if stage.status == "PENDING":
             stage.status = "SKIPPED"
 
+    from .progress import settle_stage
+    settle_stage(remote_path, stage_name, failed=False, reason="Skipped because a prerequisite stage failed")
     refresh_live()
 
 

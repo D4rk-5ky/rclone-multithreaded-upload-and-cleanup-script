@@ -1,6 +1,6 @@
 # rclone-multithreaded-upload
 
-Version 0.0.30
+Version 0.0.31
 
 `rclone-multithreaded-upload` uploads one or more local directories to independent rclone destinations while enforcing configured age, file-count, folder-size, and managed remote-size limits.
 
@@ -125,6 +125,26 @@ Keep the entry script and the complete `rclone_multithreaded_upload/` package to
 ```
 
 A normal successful remote therefore uses three recursive `rclone lsjson` snapshots: PRE-UPLOAD, POST-UPLOAD, and FINAL.
+
+## Parallel destination progress
+
+The live card shows the entire run and every destination at the same time. It lists all active workers, each destination's configured step total, completed/running/failed/skipped counts, current operations, full step table and its own latest diagnostics. A faster destination waiting at a global barrier is shown as waiting rather than falsely running.
+
+For example, destinations with 7, 12 and 16 steps produce one run with **35 total steps**. The overall completed count is the sum of their individual completed counts. Steps are settled when successful, failed, skipped or interrupted; reaching 100% does not imply success. The separate job outcome still comes from the existing reservation/upload/cleanup/verification results.
+
+The planned denominator is fixed at initialization from each destination's actual settings:
+
+```text
+7 base steps
++ 2 × number of cleanup rules (pre-upload and post-upload rule planning)
++ 3 when managed quota reservation is enabled (local snapshot, reservation, post-quota planning)
++ 2 when empty_trash is enabled (pre/post trash checks)
++ 1 when sleep_after_step is greater than zero (pre-upload wait)
+```
+
+The base steps are the three remote snapshots, two combined delete-plan executions, upload and final verification. Commands with no work to do are labelled skipped. Cleanup-rule planning is tracked per path; the actual deletes remain combined by destination/delete mode. Shared cached local snapshots are acquired once per destination logically while retaining the existing single actual source listing.
+
+Use the updated `manufacturer-live-preview-card.yaml`; its manufacturer recognition and automatic role lookup remain unchanged. The card includes detailed destinations beneath the overall job. `--validate-config` prints the planned overall and per-destination totals without executing anything. See [LIVE_PREVIEW.md](LIVE_PREVIEW.md) and [PARALLEL_PROGRESS.md](PARALLEL_PROGRESS.md) for the schema and interpretation. The synthetic `parallel-progress-examples.json` and rendered `parallel-progress-preview.md` show three destinations uploading concurrently.
 
 ## Failure isolation
 
@@ -292,7 +312,7 @@ Start from `config.example.json` or the CCTV-oriented `rclone-cctv-config.exampl
 
 ### MQTT completion and independent HA live preview
 
-The application uses the supplied completion module 1.1.0 and live-preview module 1.2.0. Full rclone configs in `config.example.json` and `rclone-cctv-config.example.json` use the template's exact `completion` and `live` section names and keys. Both are disabled by default.
+The application uses the supplied completion module 1.1.0 and live-preview module 1.2.0 with an optional JSON `details` extension for parallel destination progress. Full rclone configs in `config.example.json` and `rclone-cctv-config.example.json` use the template's exact `completion` and `live` section names and keys. Both are disabled by default.
 
 | Setup | `completion.enabled` | `live.enabled` |
 | --- | --- | --- |
@@ -541,7 +561,7 @@ Final completion reporting is attempted after runtime success/failure, unexpecte
 
 `home-assistant-mqtt-automation.example.yaml` retains Pushover and persistent notifications and checks consistency of the template's status, boolean success and integer exit code. Replace `notify.pushover` with your configured action, or remove those actions. Match its exact topic to `completion.topic`. Pushover titles/messages use the supplied template's bounded formatting, with metadata and the latest stderr tail. If shortened, the message says so; the full completion payload and the persistent HA failure notification retain the complete report diagnostics.
 
-`home-assistant-live-dashboard.example.yaml` is an independent card for the live device. Progress counts settled stages across remote jobs; byte totals and speed remain unknown. Set its entity IDs to match `live.device_id`. The live topics are separate from completion notifications.
+`home-assistant-live-dashboard.example.yaml` is an independent card for the live device. Progress counts settled detailed workflow steps across all destinations, with an independent step list and counts for each destination; byte totals and speed remain unknown. Set its entity IDs to match `live.device_id`. The live topics are separate from completion notifications.
 
 For a card that fills its fields and adds matching jobs automatically, paste `manufacturer-live-preview-card.yaml` as a manual Markdown card. Both it and the raw `manufacturer-live-preview-card.md` already select manufacturer `rclone-multithreaded-upload`. No entity IDs need to be edited. The live config defaults to the same manufacturer, including when upgrading an existing config that omits this new field. Run a configured job with live publishing and discovery enabled so HA receives the updated discovery definitions and full state attributes. The per-job device name still comes from `script_name`.
 
@@ -566,6 +586,7 @@ rclone_multithreaded_upload/
     output.py
     phases.py
     planning.py
+    progress.py
     rclone_backend.py
     remote_files.py
     reservation.py
@@ -583,11 +604,13 @@ tests/
     test_ha_live_preview.py
     test_reporting_adapter.py
     test_manufacturer_card.py
+    test_parallel_progress.py
 config.example.json
 rclone-cctv-config.example.json
 home-assistant-mqtt-automation.example.yaml
 home-assistant-live-dashboard.example.yaml
 manufacturer-live-preview-card.yaml
+asus-frigate-live-preview-card.yaml
 manufacturer-live-preview-card.md
 ha-discovery-examples.json
 MQTT.md
@@ -601,9 +624,16 @@ VERSIONING.md
 commented_code_map.md
 verification_report.txt
 TEMPLATE_COMPATIBILITY.md
+PARALLEL_PROGRESS.md
+parallel-progress-examples.json
+parallel-progress-preview.md
 SHA256SUMS
 RELEASE_MANIFEST.json
 AGENTS.md
 ```
 
+The optional `asus-frigate-live-preview-card.yaml` is the same detailed card preset to manufacturer `rclone-multithreaded-upload-ubuntu-zfs-raid-import-test`, matching the custom configuration discussed with this project. Use the normal manufacturer card for the default script manufacturer. Upgrade both the application package and the card to receive and display detailed destination progress.
+
 For internal function-by-function behavior, see `commented_code_map.md`. For release history, see `VERSIONING.md`.
+
+Each destination also exposes `cleanup_jobs`: an independent view of each configured cleanup path, with its own pre/post planning states and settled/total count (normally two planning steps). These are views of the same steps and are never counted again in the overall total. Actual deletion stays in the existing combined delete-plan operation. The card displays these per-path counts above the full destination step table.

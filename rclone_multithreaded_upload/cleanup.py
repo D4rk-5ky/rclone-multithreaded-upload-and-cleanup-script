@@ -1,5 +1,6 @@
 """Combined planned deletion execution and optional backend trash cleanup."""
 
+from .progress import observe_step, skip_step
 from .commands import run_command
 from .delete_plan import execute_delete_plan
 from .models import RemoteDeletePlan, UploadDirectory
@@ -10,6 +11,7 @@ from .results import command_error_summary, record_stage_failure, script_managed
 __all__ = ["execute_delete_plan", "cleanup_one_trash_remote"]
 
 
+@observe_step(lambda args: "post_trash" if args["phase_name"].startswith("POST-UPLOAD") else "pre_trash")
 def cleanup_one_trash_remote(
     job_number: int,
     upload: UploadDirectory,
@@ -17,8 +19,10 @@ def cleanup_one_trash_remote(
 ) -> bool:
     """Optionally run rclone cleanup for one upload remote."""
     stage_name = "post_cleanup" if phase_name.startswith("POST-UPLOAD") else "reservation"
+    task_key = "post_trash" if stage_name == "post_cleanup" else "pre_trash"
 
     if not upload.empty_trash:
+        skip_step(upload.remote_path, task_key, "Trash cleanup disabled")
         print_job_block(
             "TRASH CLEANUP JOB",
             job_number,
@@ -28,6 +32,7 @@ def cleanup_one_trash_remote(
         return True
 
     if not script_managed_trash_used(upload.remote_path, stage_name):
+        skip_step(upload.remote_path, task_key, "No script-managed trash activity")
         print_job_block(
             "TRASH CLEANUP JOB",
             job_number,
@@ -53,6 +58,7 @@ def cleanup_one_trash_remote(
 
     if result.returncode != 0:
         if "not supported" in output.lower() or "doesn't support" in output.lower():
+            skip_step(upload.remote_path, task_key, "Backend does not support trash cleanup")
             print_job_block(
                 "TRASH CLEANUP JOB",
                 job_number,

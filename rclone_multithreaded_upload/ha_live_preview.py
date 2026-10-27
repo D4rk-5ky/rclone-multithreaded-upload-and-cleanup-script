@@ -1,5 +1,8 @@
 """Independent Home Assistant live job preview. Python 3.10+, optional Paho.
 
+Local extension: update(details={...}) accepts detached JSON metadata for concurrent
+application progress. The standard completion/live fields retain their semantics.
+
 No dependency on mqtt_status.py. Application updates only local memory; a
 daemon batches MQTT work into killable subprocesses. See LIVE_PREVIEW.md.
 """
@@ -205,7 +208,7 @@ class LivePreview:
                        "progress_percent": None, "transferred_bytes": None, "bytes_per_second": None,
                        "successful_datasets": [], "failed_datasets": [], "skipped_datasets": [],
                        "successful_dataset_count": 0, "failed_dataset_count": 0, "skipped_dataset_count": 0,
-                       "stderr": "", "error": "", "warning": False, "message": "", "finished_at": None}
+                       "stderr": "", "error": "", "warning": False, "message": "", "finished_at": None, "details": {}}
 
     def _snapshot_locked(self) -> dict[str, Any]:
         return json.loads(_json({"schema_version": 1, "name": self.name, "title": self.name, "job": self.job,
@@ -248,11 +251,14 @@ class LivePreview:
         """Local coalesced update. Counters refer to items with one caller-defined unit."""
         allowed = {"phase", "current_item", "completed", "total", "transferred_bytes",
                    "bytes_per_second", "stderr", "message", "successful_datasets",
-                   "failed_datasets", "skipped_datasets"}
+                   "failed_datasets", "skipped_datasets", "details"}
         if set(values) - allowed:
             raise ValueError("Unsupported progress field")
         for key, value in values.items():
-            if key.endswith("_datasets"):
+            if key == "details":
+                if not isinstance(value, dict):
+                    raise ValueError("details must be a JSON object")
+            elif key.endswith("_datasets"):
                 if not isinstance(value, list) or any(not isinstance(row, dict) for row in value):
                     raise ValueError(f"{key} must be an array of objects")
             elif key in ("phase", "current_item", "stderr", "message"):

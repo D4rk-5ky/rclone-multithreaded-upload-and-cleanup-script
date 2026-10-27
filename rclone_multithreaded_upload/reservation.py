@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import threading
 
+from .progress import observe_step
 from .commands import run_command
 from .models import LocalUploadFile, LocalUploadSnapshot, UploadDirectory
 from .output import print_job_block
@@ -172,6 +173,7 @@ def _calculate_filtered_local_upload_snapshot(upload: UploadDirectory) -> LocalU
     return LocalUploadSnapshot(tuple(files), total_bytes)
 
 
+@observe_step("local_snapshot", none_is_failure=True)
 def get_filtered_local_upload_snapshot(
     job_number: int,
     upload: UploadDirectory,

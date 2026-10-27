@@ -1,6 +1,6 @@
 # Syncerate template reporting for rclone-multithreaded-upload
 
-Version 0.0.30 uses the newly supplied template: completion module 1.1.0 and live-preview module 1.2.0. The completion and live modules are copied without changes into the Python package; `mqtt.py` and `reporting.py` adapt rclone results to them.
+Version 0.0.31 uses the newly supplied template: completion module 1.1.0 and live-preview module 1.2.0. The completion module is unchanged; the live module has a backward-compatible optional JSON-object `details` extension for parallel progress. Both retain their standard contracts; `mqtt.py` and `reporting.py` adapt rclone results to them.
 
 ## Configure the channels independently
 
@@ -57,10 +57,10 @@ Every completion payload has these template fields:
 | `warning` | Boolean; true if any remote's overall result was skipped. Warnings do not rewrite the result code. |
 | `schema_version` | Integer 1. |
 | `comment` | Optional root `comment` string, default empty. |
-| `version` | Application version, currently `"0.0.30"`. |
+| `version` | Application version, currently `"0.0.31"`. |
 | `timestamp`, `host`, `run_id` | UTC report timestamp, local hostname, unique run identifier. Both enabled channels share the run ID. |
 
-Rclone extensions remain available: `event`, `script_name`, `application`, `application_version`, `failed_remotes`, and `remotes`. Each remote retains its name, path, status, four stage statuses, and structured stage errors. Generic completion events omit Syncerate dataset sections; rclone diagnostics use `remotes`. See `payload-examples.json` for full success and failure examples.
+Rclone extensions remain available: `event`, `script_name`, `application`, `application_version`, `failed_remotes`, and `remotes`. Each remote retains its name, path, status, four stage statuses, and structured stage errors. It also has a `progress` object with its own planned steps/counts/current operations; a top-level `progress` object contains the overall totals. These are non-conflicting application extensions. Generic completion events omit Syncerate dataset sections; rclone diagnostics use `remotes`. See `payload-examples.json` for full success and failure examples.
 
 Reports are attempted after normal job completion, unexpected runtime exceptions, SIGINT and SIGTERM once the configuration is valid and the exclusive lock has been acquired. Configuration errors and an already-existing lock do not start a reporting session. The lock stays held until final reporting finishes. Completion publication has a deadline; live progress publishes in a separate background worker.
 
@@ -101,3 +101,9 @@ The current completion module still matches the supplied `mqtt_status.py` byte-f
 The rclone automation preserves its dry-run guard, strict success/failure checks, Pushover and persistent notification actions. It uses the updated supplied Pushover formatter with a 1,024-character message budget and a title below 250 characters. Only the notification copy is shortened; MQTT report fields are unchanged. It sends no next-job commands. The unrelated chain topics/readiness commands discussed in the template package are not imported into this project.
 
 Manufacturer recognition applies to the live Markdown card, independently of the completion event topic. Both files are preset to `rclone-multithreaded-upload`. The card discovers registry devices through manufacturer and reads real full JSON attributes from the status/last-result roles. No per-job entity list is required. See `TEMPLATE_COMPATIBILITY.md` for the comparison findings.
+
+## Parallel progress contract
+
+Standard completion fields and notification automation are unchanged. Live `completed`/`total` now count detailed workflow steps instead of four coarse summary stages per remote. An atomic `details` object contains every destination and its independent step list/current operations/counters. Manufacturer discovery still finds the run device; its status and retained-result attributes contain the full concurrent progress without creating a separate HA device for each worker.
+
+See `PARALLEL_PROGRESS.md`. The MQTT completion publisher remains separate from live preview, and either can be disabled independently. Byte/speed measurements remain Unknown rather than being estimated from selected/planned files.

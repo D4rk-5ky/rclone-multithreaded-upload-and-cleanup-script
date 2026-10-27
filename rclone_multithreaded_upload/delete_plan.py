@@ -3,6 +3,7 @@
 from collections import defaultdict
 from pathlib import Path
 
+from .progress import observe_step, skip_step
 from .commands import run_command
 from .models import CleanupTarget, PlannedDeletion, RemoteDeletePlan, RemoteFile, RemoteSnapshot, UploadDirectory
 from .output import print_job_block
@@ -62,6 +63,7 @@ def print_delete_plan_summary(job_number: int, plan: RemoteDeletePlan) -> None:
     )
 
 
+@observe_step(lambda args: "pre_delete" if args["stage_name"] == "reservation" else "post_delete")
 def execute_delete_plan(
     job_number: int,
     upload: UploadDirectory,
@@ -71,6 +73,7 @@ def execute_delete_plan(
     """Execute the combined plan, using one delete command per required delete mode."""
     print_delete_plan_summary(job_number, plan)
     if not plan.entries:
+        skip_step(upload.remote_path, "pre_delete" if stage_name == "reservation" else "post_delete", "No files require deletion")
         print_job_block(
             "COMBINED DELETE",
             job_number,

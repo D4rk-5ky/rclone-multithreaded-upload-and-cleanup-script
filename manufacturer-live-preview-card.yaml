@@ -84,6 +84,8 @@ content: |
   {% set dry_run = state_attr(source, 'dry_run') | default(false, true) | bool %}
   {% set error = state_attr(source, 'error') or '' %}
   {% set stderr = state_attr(source, 'stderr') or '' %}
+  {% set detail = state_attr(source, 'details') %}
+  {% set jobs = detail.remote_jobs if detail is mapping and detail.remote_jobs is defined else [] %}
   
   ---
   
@@ -123,7 +125,49 @@ content: |
   **Progress:** Unknown
   {% endif %}
   
+  {% if jobs %}
+  **Steps:** {{ done if done is not none else '?' }} / {{ total if total is not none else '?' }} settled
+  
+  **Destinations:** {{ jobs | count }} · **Active destinations:** {{ detail.active_destination_count }} · **Running steps:** {{ detail.running }} · **Failed steps:** {{ detail.failed }} · **Skipped steps:** {{ detail.skipped }}
+  
+  {% for destination in jobs %}
+  #### {{ destination.name | e | replace('\n', ' ') }} — {{ destination.status | upper }}
+  
+  {{ destination.source | e }} → {{ destination.destination | e }}
+  
+  **Progress:** {{ destination.completed }} / {{ destination.total }} steps settled ({{ destination.progress_percent }}%) · {{ destination.succeeded }} succeeded · {{ destination.failed }} failed · {{ destination.skipped }} skipped
+  
+  **Active:** {{ destination.active_steps | join('; ') | e if destination.active_steps else 'None; waiting or finished' }}
+  {% if destination.error | default('') %}
+  
+  **Destination error:** {{ destination.error | e | replace('\n', ' ') }}
+  {% endif %}
+  
+  {% if destination.cleanup_jobs | default([]) %}
+  **Individual cleanup rules — planning progress**
+  
+  | Cleanup path | Settled | Pre-upload | Post-upload |
+  |:---|:---|:---|:---|
+  {% for cleanup in destination.cleanup_jobs -%}
+  | {{ cleanup.path | e | replace('|', '&#124;') | replace('\n', ' ') }} | {{ cleanup.completed }} / {{ cleanup.total }} | {{ cleanup.pre_status }} | {{ cleanup.post_status }} |
+  {% endfor %}
+  {% endif %}
+  
+  | Step | Phase | State | Detail |
+  |:---|:---|:---|:---|
+  {% for task in destination.steps -%}
+  | {{ task.label | e | replace('|', '&#124;') | replace('\n', ' ') }} | {{ task.stage | e }} | {{ '🟢' if task.status == 'RUNNING' else '✅' if task.status == 'SUCCESS' else '🔴' if task.status == 'FAILED' else '🟠' if task.status == 'INTERRUPTED' else '⏭' if task.status == 'SKIPPED' else '⏳' }} {{ task.status }} | {{ task.error[:200] | e | replace('|', '&#124;') | replace('\n', ' ') }} |
+  {% endfor %}
+  {% if destination.stderr %}
+  
+  **Latest output for {{ destination.name | e }}**
+  
+  <pre>{{ destination.stderr | e }}</pre>
+  {% endif %}
+  {% endfor %}
+  {% else %}
   **Items:** {{ done if done is not none else '?' }} / {{ total if total is not none else '?' }} completed
+  {% endif %}
   
   {% if successful or failed or skipped %}
   **Remotes:** {{ successful | count }} successful · {{ failed | count }} failed · {{ skipped | count }} skipped
@@ -164,4 +208,4 @@ content: |
   **No matching live-preview devices detected.** Set the same manufacturer name in LiveConfig and at the top of this template, enable MQTT discovery, and start a job using the updated live module.
   {% endif %}
   
-  _Running is determined by the live heartbeat. Expired live sensors use the retained result unless a different unfinished run is known. Unknown progress stays unknown. Items are the adapter's configured counting unit; dataset outcomes are listed separately. Average speed is a run average._
+  _Running is determined by the live heartbeat. Expired live sensors use the retained result unless a different unfinished run is known. Unknown progress stays unknown. Steps are settled workflow observations, including failures and skips; destination progress is tracked independently. Generic jobs without detailed progress use their configured item unit. Average speed is a run average._

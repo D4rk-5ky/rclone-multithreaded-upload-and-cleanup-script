@@ -73,10 +73,13 @@ def print_startup_summary(cleanup_directories: list[CleanupTarget]):
 
         print()
         print(f"Upload destinations: {len(STATE.upload_directories)}")
+        print(f"Detailed workflow steps: {sum(len(result.steps) for result in STATE.run_results.values())}")
         for index, upload in enumerate(STATE.upload_directories, start=1):
             print()
             print(f"UPLOAD DESTINATION {index}")
             print(f"  Name                  : {upload.name or '(not set)'}")
+            result = STATE.run_results.get(upload.remote_path)
+            print(f"  Workflow steps        : {len(result.steps) if result else 0}")
             print(f"  Local path            : {upload.local_path}")
             print(f"  Remote path           : {upload.remote_path}")
             print(f"  Upload command        : {upload.upload_command}")
