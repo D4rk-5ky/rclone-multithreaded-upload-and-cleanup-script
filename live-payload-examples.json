@@ -7,7 +7,7 @@
     "device_id": "rclone_multithreaded_upload",
     "run_id": "rclone-example-success",
     "host": "darkyere-VirtualBox",
-    "version": "0.0.27",
+    "version": "0.0.30",
     "dry_run": false,
     "started_at": "2026-10-27T07:32:14.361628+00:00",
     "last_heartbeat": "2026-10-27T07:32:14.361683+00:00",
@@ -32,7 +32,8 @@
     "error": "",
     "warning": false,
     "message": "",
-    "finished_at": null
+    "finished_at": null,
+    "manufacturer": "rclone-multithreaded-upload"
   },
   "success": {
     "schema_version": 1,
@@ -42,7 +43,7 @@
     "device_id": "rclone_multithreaded_upload",
     "run_id": "rclone-example-success",
     "host": "darkyere-VirtualBox",
-    "version": "0.0.27",
+    "version": "0.0.30",
     "dry_run": false,
     "started_at": "2026-10-27T07:32:14.361628+00:00",
     "last_heartbeat": "2026-10-27T07:32:14.361820+00:00",
@@ -72,6 +73,7 @@
     "error": "",
     "warning": false,
     "message": "",
-    "finished_at": "2026-10-27T07:32:14.361767+00:00"
+    "finished_at": "2026-10-27T07:32:14.361767+00:00",
+    "manufacturer": "rclone-multithreaded-upload"
   }
 }

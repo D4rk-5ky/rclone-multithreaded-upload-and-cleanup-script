@@ -66,6 +66,7 @@ def print_startup_summary(cleanup_directories: list[CleanupTarget]):
         if STATE.live_config.enabled:
             print(f"  Broker                  : {STATE.live_config.host}:{STATE.live_config.port}")
             print(f"  Device ID               : {STATE.live_config.device_id}")
+            print(f"  Manufacturer            : {STATE.live_config.manufacturer}")
             print(f"  State topic             : {STATE.live_config.state_topic}")
             print(f"  Last result topic       : {STATE.live_config.result_topic}")
             print(f"  Discovery               : {STATE.live_config.discovery}")

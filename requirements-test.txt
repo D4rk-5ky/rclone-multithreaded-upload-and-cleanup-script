@@ -1,0 +1,3 @@
+# Optional: rendering tests for the Home Assistant Markdown/YAML card.
+Jinja2>=3.1,<4
+PyYAML>=6,<7

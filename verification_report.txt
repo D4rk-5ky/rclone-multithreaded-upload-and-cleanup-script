@@ -1,46 +1,96 @@
-Verification report — rclone-multithreaded-upload 0.0.27
-Date: 2026-10-27
+Verification report — rclone-multithreaded-upload 0.0.30
+Date: 2026-10-27 (Europe/Copenhagen)
 
-Inputs:
-- rclone-multithreaded-upload-and-cleanup-script-main.zip, application 0.0.26
-- syncerate-mqtt-template.zip, modules 1.1.0
+Inputs
+- Original supplied project: rclone-multithreaded-upload-and-cleanup-script-main.zip, application 0.0.26.
+- Previous delivered release: rclone-multithreaded-upload-and-cleanup-script-0.0.29.zip, application 0.0.29.
+- Newly supplied template: syncerate-mqtt-template.zip; completion 1.1.0,
+  live preview 1.2.0 and manufacturer Markdown/YAML card.
+- Inspected current source/module structure, config, docs/test inventory and the
+  newly supplied template/discovery/card/tests before changing code.
 
-Environment: Python 3.14.4, Linux.
-Command from project root: python3 -m unittest discover -s tests -v
-Result: 103 tests passed in 6.469 seconds (OK).
+Changes
+- Application version incremented by exactly 0.0.1 to 0.0.30.
+- Compared the latest supplied template against the complete previous project.
+  Completion 1.1.0 and live 1.2.0 still match byte-for-byte. The manufacturer card
+  still matches after the application manufacturer/comment/remote-label presets.
+- Updated the existing combined HA automation with the supplied bounded Pushover
+  formatter, preserving bounded rclone remote summaries in the same message
+  budget. It limits title/metadata fields, keeps the latest stderr tail, and
+  indicates shortening. The complete report and persistent failure notification
+  retain full report diagnostics. Template priority/sound fields are reused.
+- Preserved strict typed outcome gates, dry-run guard, topic, Pushover/persistent
+  actions and the existing malformed-report fallback. No sequencing command ran
+  or was added. Unrelated chain guidance in the template was not applied.
+- All production Python modules are byte-identical to 0.0.29 except
+  the version constant. Upload, cleanup, quota, reservation, backend, trash,
+  stage-barrier, lock and publisher behavior are unchanged.
+- Added six rendered automation regressions and their helpers; existing template,
+  manufacturer-card, adapter and real-worker/fake-rclone tests are reused.
+- Updated current usage guides, version history, full function/command map and
+  payload/discovery example versions. Added TEMPLATE_COMPATIBILITY.md with source
+  archive hash and findings. Both config examples already contain every canonical
+  option and keep their existing settings. The owner disclaimer is verbatim.
+- Preserved all original/previous files; completion/live remain independent and
+  manufacturer selection remains rclone-multithreaded-upload.
 
-Coverage:
-- Existing planning, reservation, cleanup, upload, quotas, remote snapshots,
-  newest-first selection, trash/delete modes, stage barriers and CLI behavior.
-- Template completion contract, typed fields, optional dataset diagnostics,
-  metadata, UTF-8, finite JSON values, stderr bounds and detached extensions.
-- Template success/dry-run gates, disabled dependency behavior, credentials via
-  stdin, verified TLS, publisher deadlines, sanitized failures and frozen hooks.
-- Template live lifecycle, discovery, heartbeat, retention, expiry settings,
-  progress validation, outcome arrays, final state, interrupts and incomplete jobs.
-- Real publisher subprocesses with fake Paho modules, including timeout cases.
-- Rclone adapter: all four independent channel combinations, shared run IDs,
-  stage failures, runtime exceptions, SIGTERM/KeyboardInterrupt mapping, lock
-  ownership through final reporting, disabled validation/existing-lock paths,
-  concurrent monotonic counters and sanitized bounded diagnostics.
-- Full application invocation against fake rclone plus actual completion/live
-  subprocess workers using fake Paho: one completion event, two remote results,
-  eight settled stages, shared run ID, non-retained live state and completion,
-  retained live last result, and existing three-snapshot/stage-barrier checks.
+Basic and structural verification
+Code map covers all 326 explicit Python functions/methods, including helpers nested in control-flow blocks.
+All Python source/tests compile and parse as Python 3.10 syntax.
+config.example.json: complete canonical option coverage, matching manufacturer, CLI validation exit 0.
+rclone-cctv-config.example.json: complete canonical option coverage, matching manufacturer, CLI validation exit 0.
+CLI --help: expected exit 0.
+CLI --version: expected exit 0.
+CLI (no args): expected exit 2.
+CLI --unknown: expected exit 2.
+All HA YAML/Jinja syntax parses; raw card and YAML content match exactly with the script manufacturer preset.
+Completion 1.1.0 and live 1.2.0 match the newly supplied template byte-for-byte.
+All upload/cleanup/quota/reservation/backend/barrier/lock logic and the completion adapter are byte-identical to v0.0.29.
+Owner disclaimer preserved verbatim; prior files preserved for final archive comparison.
+All production Python code is unchanged from v0.0.29 except the version constant.
+Final Markdown/YAML cards match the latest supplied logic exactly after rclone manufacturer/comment/remote-label substitutions.
+HA formatter matches the new supplied Pushover variables/message, with only bounded rclone remote-summary header extensions.
 
-Additional checks:
-- Both example configs pass the real CLI --validate-config command (exit 0).
-- CLI --version reports 0.0.27.
-- Every Python file parses with Python 3.10 syntax rules.
-- Every JSON file parses.
-- Supplied mqtt_status.py and ha_live_preview.py match the template ZIP byte-for-byte.
-- HA automation/dashboard YAML parses, including embedded Jinja syntax.
-- Automation gates accept valid success/failure and reject boolean exit codes,
-  inconsistent results and missing status.
-- Release SHA256SUMS and ZIP contents verified after packaging.
+Offline regression suite
+Environment: Python 3.14.4 (main, Aug 20 2026, 10:41:58) [GCC 15.2.0] on Linux.
+Command from project root:
+  PYTHONDONTWRITEBYTECODE=1 python3 -B -m unittest discover -s tests -v
+Result: 128 tests passed in 13.697 seconds (OK); no skipped tests.
 
-Limits:
-No real MQTT broker, Home Assistant instance, TLS endpoint, rclone provider,
-production upload, or production deletion was exercised. Python 3.10 runtime and
-frozen executables were not built/run. HA YAML was checked locally, not imported
-into an HA installation. Transferred bytes/speed intentionally remain null.
+Coverage includes existing safety/planning/CLI regressions; completion JSON types,
+policy/TLS/deadlines; actual worker subprocesses with fake Paho; live manufacturer,
+stable unique IDs, full JSON attributes and role markers; card rendering through
+actual discovery templates; automatic new jobs, renamed entities, first runs,
+retained results, lost heartbeats, unknown metrics, outcomes and escaped stderr.
+
+The real-entrypoint fake-rclone fixture runs both success and partial
+upload failure, verifying integer exit codes, boolean success, success/failure
+status, error/stderr strings, separate completion/live topics, shared run IDs,
+proper retention, actual remote outcomes and updated discovery. HA automation
+conditions were rendered with real adapter reports and inconsistent JSON cases.
+An actual rclone-adapter state/discovery-to-Markdown test checks automatic fields
+and renamed entities for both success and failure. Additional rendered automation
+checks cover valid success/failure metadata, long error/stderr and latest tail,
+Unicode/long metadata, title <=250 and message <=1024 characters, full persistent
+diagnostics, short output without a shortening marker, preview suppression, and
+inconsistent/nonobject JSON avoiding Pushover. All optional rendering tests ran.
+
+Final package verification
+- Original file paths retained: 36/36; no missing files.
+- Previous release file paths retained: 54/54; no missing files.
+- Final intended file count: 55. ZIP membership matches release directory
+  and RELEASE_MANIFEST.json exactly; every archived file matches local bytes.
+- ZIP CRC, per-file SHA256SUMS, executable entry-script mode and sibling archive
+  SHA256 are verified. No bytecode, build cache, temporary files or test logs
+  are included. Work scripts/logs remain outside the deliverable.
+
+Not fully tested
+- No real MQTT broker, Home Assistant instance, notification action, TLS endpoint
+  or cloud provider was contacted. No production upload, move or deletion ran.
+- User-specific broker credentials/configuration were not supplied; transport and
+  HA registry behavior were simulated offline. A live installation must receive
+  refreshed discovery/state from a configured enabled run to populate the card.
+- Python 3.10 syntax was checked; runtime tests used Python 3.14.4. No frozen binary
+  or cross-platform deployment was built or tested.
+- Measured transferred bytes/speed remain unknown because the rclone adapter does
+  not parse actual transfer statistics; the automatic card preserves Unknown.

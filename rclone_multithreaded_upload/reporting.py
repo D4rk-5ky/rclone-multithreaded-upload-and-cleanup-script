@@ -3,13 +3,13 @@
 import re
 import uuid
 
-from . import VERSION
+from . import APPLICATION_NAME, VERSION
 from .ha_live_preview import LivePreview
 from .output import print_error
 from .state import STATE
 
 STAGES = ("reservation", "upload", "post_cleanup", "final_quota")
-JOB = "rclone-multithreaded-upload"
+JOB = APPLICATION_NAME
 
 
 def sanitize(text: str) -> str:

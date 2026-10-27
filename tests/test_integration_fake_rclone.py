@@ -153,6 +153,9 @@ if args and args[0] in {"copy", "sync", "move"}:
         for item in uploaded:
             (local_path / item["path"]).unlink()
     print("Transferred: fake integration upload")
+    if os.environ.get("FAKE_RCLONE_FAIL") == remote:
+        print("ERROR: simulated partial upload failure", file=sys.stderr)
+        sys.exit(23)
     sys.exit(0)
 
 print(f"unsupported fake rclone args: {args}", file=sys.stderr)
@@ -162,6 +165,12 @@ sys.exit(2)
 
 class FakeRcloneIntegrationTests(unittest.TestCase):
     def test_complete_application_flow_and_stage_barriers(self):
+        self._run_complete_application_flow()
+
+    def test_partial_upload_failure_still_reports_completion_and_live_result(self):
+        self._run_complete_application_flow(fail_upload=True)
+
+    def _run_complete_application_flow(self, fail_upload=False):
         project_root = Path(__file__).resolve().parents[1]
 
         with tempfile.TemporaryDirectory() as temp_text:
@@ -271,6 +280,8 @@ def single(topic, payload, **options):
 ''')
             mqtt_log = temp / "mqtt.jsonl"
             env["FAKE_MQTT_LOG"] = str(mqtt_log)
+            if fail_upload:
+                env["FAKE_RCLONE_FAIL"] = "fast:root"
             env["PYTHONPATH"] = os.pathsep.join([str(fake_packages), str(project_root)])
             configured = json.loads(config_path.read_text())
             configured["completion"] = {"enabled": True, "host": "offline-broker", "topic": "rclone/completion"}
@@ -307,13 +318,23 @@ def single(topic, payload, **options):
                     + state_text
                 )
 
-            self.assertEqual(result.returncode, 0, result.stdout)
-            self.assertIn("OVERALL RESULT: SUCCESS", result.stdout)
+            expected_code = 1 if fail_upload else 0
+            expected_status = "failure" if fail_upload else "success"
+            self.assertEqual(result.returncode, expected_code, result.stdout)
+            self.assertIn("OVERALL RESULT: " + ("FAILED" if fail_upload else "SUCCESS"), result.stdout)
             messages = [json.loads(line) for line in mqtt_log.read_text().splitlines()]
             completions = [row for row in messages if row["topic"] == "rclone/completion"]
             self.assertEqual(len(completions), 1)
             completion = json.loads(completions[0]["payload"])
-            self.assertEqual(completion["status"], "success")
+            self.assertEqual(completion["status"], expected_status)
+            self.assertIs(completion["success"], not fail_upload)
+            self.assertEqual(completion["exit_code"], expected_code)
+            self.assertIsInstance(completion["error"], str)
+            self.assertIsInstance(completion["stderr"], str)
+            if fail_upload:
+                self.assertIn("simulated partial upload failure", completion["error"])
+                self.assertIn("simulated partial upload failure", completion["stderr"])
+                self.assertEqual(completion["failed_remotes"], ["Fast"])
             self.assertFalse(completions[0]["retain"])
             self.assertEqual(len(completion["remotes"]), 2)
             finals = [row for row in messages if row["topic"].endswith("/last_result")]
@@ -321,8 +342,16 @@ def single(topic, payload, **options):
             final = json.loads(finals[0]["payload"])
             self.assertEqual(final["completed"], 8)
             self.assertEqual(final["total"], 8)
-            self.assertEqual(final["successful_dataset_count"], 2)
-            self.assertEqual(final["status"], "success")
+            self.assertEqual(final["successful_dataset_count"], 1 if fail_upload else 2)
+            self.assertEqual(final["failed_dataset_count"], int(fail_upload))
+            self.assertEqual(final["status"], expected_status)
+            self.assertEqual(final["manufacturer"], "rclone-multithreaded-upload")
+            discovery = [json.loads(row["payload"]) for row in messages if row["topic"].endswith("/config")]
+            self.assertTrue(discovery)
+            self.assertTrue(all(spec["device"]["manufacturer"] == "rclone-multithreaded-upload" for spec in discovery))
+            tagged = [spec for spec in discovery if "json_attributes_template" in spec]
+            self.assertEqual(len(tagged), 2)
+            self.assertTrue(all("live_preview_role" in spec["json_attributes_template"] for spec in tagged))
             self.assertEqual(final["run_id"], completion["run_id"])
             self.assertTrue(finals[0]["retain"])
             self.assertTrue(all(not row["retain"] for row in messages if row["topic"].endswith("/state")))

@@ -1,43 +1,74 @@
-⚠️ Disclaimer & Responsibility
-This software is provided “as is”, without any warranty of any kind.
+# rclone-multithreaded-upload
 
-By using this script, you accept full responsibility for:
+Version 0.0.30
 
-How the code is used
-What commands are executed
-Testing the script in your own environment
-Verifying that it behaves exactly as you expect
-Any damage, data loss, downtime, or security issues caused directly or indirectly by its use
-The author is not liable for:
+`rclone-multithreaded-upload` uploads one or more local directories to independent rclone destinations while enforcing configured age, file-count, folder-size, and managed remote-size limits.
 
-System damage
-Data loss
-Accidental shutdowns or reboots
-Security breaches
-Misconfiguration or misuse
-You must review, test, and validate the script and all configured commands before using it in production or on critical systems.
+The application is deliberately stage-based. Threads inside a stage run independently, but the next stage does not begin until every worker in the current stage has finished.
+
+## ⚠️ Disclaimer / Liability
+
+**Use this script at your own risk.**
+
+The author takes **no responsibility or liability** for any data loss, service disruption, misconfiguration, service outage, missed backups, credential exposure, or other damage that may occur from using this script.
+
+Before running it in production, you **must**:
+
+- Read the entire source code
+- Understand exactly what it does (and what it does *not* do)
+- Review and adapt it to your own environment
+- Test it carefully in a non‑production setup
+
+By using this script, **you accept full responsibility** for its effects.
 
 ⚠️ AI-assisted / vibe-coded experimental software. Use at your own risk.
 
-Disclaimer
+## Disclaimer
+
 This project is AI-assisted / vibe-coded software created as a hobby project. It has not been professionally audited and may contain bugs, unsafe behavior, data-loss issues, security problems, or incorrect assumptions.
 
 You are responsible for reviewing the code, testing it in a safe environment, making backups, and understanding what it does before using it on real data. The author is not responsible for damage, data loss, broken systems, security issues, or other problems caused by using this software.
 
-Data Loss Warning
+---
+
+### Remote data and source-file effects
+
 This application can perform destructive operations on configured rclone remotes. Cleanup, age-based deletion, file-count limits, directory-size limits, and total remote-size enforcement can permanently delete remote files to make space for uploads.
 
 If a managed remote contains backup data, incorrect remote paths, cleanup paths, filters, age settings, or size limits can delete valid backup copies and may leave you without a usable online backup. Do not treat a remote managed by this script as your only backup.
 
 Always test with disposable data or a test remote first, run `--validate-config`, review the effective remote paths and cleanup limits, and keep at least one separate working backup that this application cannot delete.
 
-# rclone-multithreaded-upload
+## Start using the app
 
-Version 0.0.27
+Use a disposable test remote and source directory for the first run. From the extracted project folder:
 
-`rclone-multithreaded-upload` uploads one or more local directories to independent rclone destinations while enforcing configured age, file-count, folder-size, and managed remote-size limits.
+```bash
+cp config.example.json config.json
+```
 
-The application is deliberately stage-based. Threads inside a stage run independently, but the next stage does not begin until every worker in the current stage has finished.
+Edit `config.json` with your actual source directories, rclone destinations, cleanup rules and limits. The examples use placeholder paths/remotes. Use `rclone-cctv-config.example.json` for the CCTV layout. Both examples show every canonical application config option, including all completion and live-preview settings.
+
+If you enable either MQTT channel, install its optional dependency into the Python environment running the script:
+
+```bash
+python3 -m pip install -r requirements-mqtt.txt
+requirements-test.txt
+```
+
+Check configuration syntax and values, then review the printed settings:
+
+```bash
+python3 rclone-multithreaded-upload.py --config ./config.json --validate-config
+```
+
+Validation does not check remote credentials, broker connectivity or source file contents. It creates no job lock, runs no rclone commands and publishes no MQTT messages. After reviewing and testing your settings, a normal invocation runs the configured work:
+
+```bash
+python3 rclone-multithreaded-upload.py --config ./config.json
+```
+
+Keep the entry script and the complete `rclone_multithreaded_upload/` package together. JSON does not support comments; the option tables below and linked MQTT guides explain every setting.
 
 ## Execution order
 
@@ -164,14 +195,14 @@ Identical local source/filter combinations share one concurrent local `lsjson` s
 
 ## Requirements
 
-- Python 3 with support for `X | None` type syntax.
+- Python 3.10 or newer.
 - `rclone` available in `PATH` for a normal run.
 - Configured rclone remotes.
 - Read access to every configured local upload path.
 - Write permission for the lock-file parent and delete-list directory.
 - Remote permissions required by the configured upload, delete, and optional trash-cleanup operations.
 
-The Python application itself uses only the standard library.
+The upload/cleanup application uses the Python standard library. Either MQTT channel additionally requires the optional Paho dependency when enabled.
 
 ## CLI commands and flags
 
@@ -181,7 +212,7 @@ The executable has four user-facing option groups. `--help` documents all of the
 | --- | --- |
 | `-h`, `--help` | Print the complete CLI help, including every supported flag, examples, and usage, then exit. A config file is not required. |
 | `-c PATH`, `--config PATH` | Path to the JSON configuration file. Required for a normal run and for `--validate-config`. The filename extension is not enforced; the content must be valid JSON. |
-| `--validate-config` | Load and validate the config, print the effective startup summary, then exit without creating the lock file or running any rclone command. Must be used together with `-c/--config`. |
+| `--validate-config` | Load and validate the config and print the effective startup summary. Creates no lock, runs no rclone commands and publishes no MQTT. It does not verify remote/broker connectivity or source contents. Requires `-c/--config`. |
 | `--version` | Print the application version and exit. A config file is not required. |
 
 Show the complete help:
@@ -232,9 +263,11 @@ error: unrecognized arguments: --wrong-flag
 
 ## Exit behavior
 
-- `0`: the complete requested run succeeded.
-- `1`: config loading failed or at least one required runtime stage failed.
-- Existing lock file: the application prints `Lock file exists, exiting.` and exits without starting work.
+- `0`: a normal job completed successfully, config validation passed, or an existing lock caused a skip.
+- `1`: config loading failed, a required runtime stage failed, or an unexpected job error occurred.
+- `2`: command-line parsing failed; complete help is printed.
+- `--help` and `--version`: exit with `0` without requiring a config file.
+- Existing lock file: prints `Lock file exists, exiting.` and exits with `0` without starting work or reporting a new job.
 - SIGINT/SIGTERM: the application finalizes enabled reporting channels, removes its lock, and exits with `128 + signal number`.
 
 ## Configuration
@@ -259,7 +292,7 @@ Start from `config.example.json` or the CCTV-oriented `rclone-cctv-config.exampl
 
 ### MQTT completion and independent HA live preview
 
-Version 0.0.27 integrates the supplied Syncerate MQTT template 1.1.0. Full rclone configs in `config.example.json` and `rclone-cctv-config.example.json` use the template's exact `completion` and `live` section names and keys. Both are disabled by default.
+The application uses the supplied completion module 1.1.0 and live-preview module 1.2.0. Full rclone configs in `config.example.json` and `rclone-cctv-config.example.json` use the template's exact `completion` and `live` section names and keys. Both are disabled by default.
 
 | Setup | `completion.enabled` | `live.enabled` |
 | --- | --- | --- |
@@ -270,11 +303,11 @@ Version 0.0.27 integrates the supplied Syncerate MQTT template 1.1.0. Full rclon
 
 Set your broker host, credentials and topics separately in each enabled section. Install the optional dependency with `python3 -m pip install -r requirements-mqtt.txt`. Check the complete config with `python3 rclone-multithreaded-upload.py --config config.json --validate-config`; validation never publishes.
 
-Completion JSON now includes all template fields: `status`, boolean `success`, `title`, `name`, `job`, boolean `dry_run`, integer `exit_code`, string `error`/`stderr`, boolean `warning`, and schema/command/comment/version/timestamp/host/run metadata. The name/title come from `script_name`, and job/command identify `rclone-multithreaded-upload`. The existing `script_name`, `failed_remotes`, per-remote stages/errors and application metadata remain as extensions. A successful report has `error: ""`.
+Completion JSON includes all template fields: `status`, boolean `success`, `title`, `name`, `job`, boolean `dry_run`, integer `exit_code`, string `error`/`stderr`, boolean `warning`, and schema/command/comment/version/timestamp/host/run metadata. The name/title come from `script_name`, and job/command identify `rclone-multithreaded-upload`. The existing `script_name`, `failed_remotes`, per-remote stages/errors and application metadata remain as extensions. A successful report has `error: ""`.
 
 `completion.on_success=false` suppresses successful completion events while keeping failure reports; it has no effect on live preview. Completion events are non-retained. Live state is on its own topics, with retained discovery and a separate retained last result. Live preview observes a real job and does not enable a dry-run mode. MQTT transport failures preserve the rclone/cleanup exit code.
 
-See [MQTT.md](MQTT.md) for every config key, payload mappings, old `mqtt` config migration and HA notification setup. See [LIVE_PREVIEW.md](LIVE_PREVIEW.md) for live settings, stage-based progress and dashboard setup. Full JSON examples are in `payload-examples.json` and `live-payload-examples.json`.
+See [MQTT.md](MQTT.md) for every config key, payload mappings, old `mqtt` config migration and HA notification setup. See [LIVE_PREVIEW.md](LIVE_PREVIEW.md) for live settings, stage-based progress and dashboard setup. The HA device name comes from `script_name`; with the example device ID the status entity is `sensor.job_live_rclone_multithreaded_upload_status`. Full JSON examples are in `payload-examples.json` and `live-payload-examples.json`.
 
 ### `thread_limits`
 
@@ -469,13 +502,19 @@ rclone sync LOCAL_PATH REMOTE: [options]
 rclone move LOCAL_PATH REMOTE: [options]
 ```
 
+| Upload command | Effect |
+| --- | --- |
+| `copy` | Copy selected local files to the destination; the upload itself does not remove the source or prune unrelated destination files. Configured cleanup phases still apply. |
+| `sync` | Make the destination match the selected source using rclone sync behavior, including destination deletions where applicable. |
+| `move` | Transfer selected local files and allow rclone to remove successfully moved source files. |
+
 For quota-managed uploads, source-selection filters are first applied to the frozen local snapshot, then replaced on the transfer command by the exact generated `--files-from0` list. Non-filter options such as stats and transfer concurrency remain in place.
 
 `sync` can delete destination files that are absent from the selected source according to normal rclone sync semantics. For quota-managed `sync`, `--delete-excluded` is rejected during config validation because over-budget files are intentionally excluded from the generated list and must not be deleted from the destination merely because they were skipped for that run.
 
 ## Generated files and lock behavior
 
-The configured lock file prevents two normal instances from running at once. The file contains the process PID and is removed on normal process exit through the registered cleanup handler, and also on handled SIGINT/SIGTERM.
+The configured lock file prevents two normal instances using that lock path from running at once. The file contains the process PID and is removed on normal process exit through the registered cleanup handler, and also on handled SIGINT/SIGTERM.
 
 Combined delete plans are written below `delete_list_dir` with names derived from the phase, delete mode, and a readable remote-name fragment plus the full SHA-256 of the original `remote_path`. The hash prevents legacy filename collisions such as `a:b/c` versus `a_b:c`. The generated delete lists are passed to `rclone delete --files-from`.
 
@@ -500,9 +539,11 @@ A stage can be `SUCCESS`, `FAILED`, or `SKIPPED`. Captured failure details are p
 
 Final completion reporting is attempted after runtime success/failure, unexpected exceptions and handled interrupts once a valid configuration and exclusive job lock are available. Existing-lock exits and `--validate-config` start neither channel. Reporting finishes before this invocation releases its lock.
 
-`home-assistant-mqtt-automation.example.yaml` retains Pushover and persistent notifications and checks consistency of the template's status, boolean success and integer exit code. Replace `notify.pushover` with your configured action, or remove those actions. Match its exact topic to `completion.topic`.
+`home-assistant-mqtt-automation.example.yaml` retains Pushover and persistent notifications and checks consistency of the template's status, boolean success and integer exit code. Replace `notify.pushover` with your configured action, or remove those actions. Match its exact topic to `completion.topic`. Pushover titles/messages use the supplied template's bounded formatting, with metadata and the latest stderr tail. If shortened, the message says so; the full completion payload and the persistent HA failure notification retain the complete report diagnostics.
 
 `home-assistant-live-dashboard.example.yaml` is an independent card for the live device. Progress counts settled stages across remote jobs; byte totals and speed remain unknown. Set its entity IDs to match `live.device_id`. The live topics are separate from completion notifications.
+
+For a card that fills its fields and adds matching jobs automatically, paste `manufacturer-live-preview-card.yaml` as a manual Markdown card. Both it and the raw `manufacturer-live-preview-card.md` already select manufacturer `rclone-multithreaded-upload`. No entity IDs need to be edited. The live config defaults to the same manufacturer, including when upgrading an existing config that omits this new field. Run a configured job with live publishing and discovery enabled so HA receives the updated discovery definitions and full state attributes. The per-job device name still comes from `script_name`.
 
 ## Project files
 
@@ -538,20 +579,31 @@ rclone_multithreaded_upload/
 tests/
     test_logic.py
     test_integration_fake_rclone.py
+    test_mqtt_status.py
+    test_ha_live_preview.py
+    test_reporting_adapter.py
+    test_manufacturer_card.py
 config.example.json
 rclone-cctv-config.example.json
 home-assistant-mqtt-automation.example.yaml
 home-assistant-live-dashboard.example.yaml
+manufacturer-live-preview-card.yaml
+manufacturer-live-preview-card.md
+ha-discovery-examples.json
 MQTT.md
 LIVE_PREVIEW.md
 payload-examples.json
 live-payload-examples.json
 requirements-mqtt.txt
+requirements-test.txt
 README.md
 VERSIONING.md
 commented_code_map.md
 verification_report.txt
+TEMPLATE_COMPATIBILITY.md
 SHA256SUMS
+RELEASE_MANIFEST.json
+AGENTS.md
 ```
 
 For internal function-by-function behavior, see `commented_code_map.md`. For release history, see `VERSIONING.md`.

@@ -4,6 +4,22 @@ Set root `live.enabled` to true to observe rclone execution in HA. This works wi
 
 The script starts the monitor after acquiring its existing exclusive job lock. Each worker updates local memory; the supplied template coalesces updates, publishes heartbeats and refreshes discovery through timeout-bounded subprocesses. It cannot change the rclone result or its phase order.
 
+## Automatic Markdown dashboard
+
+Paste the complete `manufacturer-live-preview-card.yaml` into a manual Markdown card in HA. Alternatively paste only `manufacturer-live-preview-card.md` into a Markdown card's Content field. Both files already contain:
+
+```jinja
+{% set manufacturer = 'rclone-multithreaded-upload' %}
+```
+
+The card finds devices whose HA manufacturer matches this application, discovers their status and last-result entities through the `live_preview_role` attributes, and fills phase/current item, counters/progress, runtime, outcomes, error and stderr automatically. No per-job entity IDs are configured. The JSON dataset arrays contain rclone remote outcomes and are displayed as remotes. Jobs added later appear automatically, and renamed entities remain supported after receiving discovery/state.
+
+Set `live.enabled=true` and `live.discovery=true`, configure the live broker and install `requirements-mqtt.txt`. Run your already reviewed job configuration once with the updated code so retained discovery definitions are refreshed. Both config examples include the matching manufacturer; an existing config that omits it also receives this application default. The friendly device name remains root `script_name`, and the stable `device_id` and discovery unique IDs are unchanged. A different manufacturer override requires changing the card selector too.
+
+The updated template publishes the full JSON state as attributes on the status and retained-result sensors, tagged `live_preview_role: status` / `last_result`. This makes every available field discoverable. A newer run whose heartbeat expires is shown as unknown rather than replaced by an older success. Missing measured bytes/speed remain Unknown; the card does not invent measurements.
+
+`home-assistant-live-dashboard.example.yaml` is preserved as an optional entities/gauge layout for a specific device. The manufacturer card is the automatic alternative. `ha-discovery-examples.json` shows the actual rclone discovery definitions.
+
 ## Rclone measurements
 
 - `phase`: `reservation_and_upload`, `post_upload_cleanup`, `final_verification`, then `finished`. The first phase includes the existing preparation/trash/upload barriers.
@@ -28,6 +44,7 @@ Configured MQTT passwords and common rclone credential flags are redacted from r
 | `timeout` | `5` | Positive finite seconds per publisher subprocess. |
 | `tls` | `false` | Verified TLS. |
 | `ca_certs`, `certfile`, `keyfile` | `null` | Optional TLS paths, resolved beside the JSON config; same validation as completion. |
+| `manufacturer` | `"rclone-multithreaded-upload"` | Application group published in discovery and state. The automatic card selects this exact value. Custom overrides must match the card selector. |
 | `device_id` | Derived | Lowercase letters, numbers and underscores, 1–80 characters. If omitted, derived stably from hostname, application and absolute config path. Examples explicitly use `rclone_multithreaded_upload`. |
 | `topic_prefix` | `"job-live"` | State and retained-result topic prefix. Rclone config examples set `rclone-upload/live`. |
 | `discovery` | `true` | Publish retained discovery for 14 sensors. |
@@ -48,3 +65,24 @@ With the provided example settings:
 Live status uses the template's `running`, `success`, `failure`, `interrupted` or `incomplete` states. Unknown measurements remain JSON null. SIGINT/SIGTERM finalize with nonzero integer codes 130/143 and live status `interrupted`; their completion events use standard `failure`. Lost heartbeats expire to unavailable and do not imply success or failure. Live sensors also expire normally after a finished job; the separate retained last-result sensor holds the last real outcome.
 
 The monitor sends no notifications itself. Enable the completion channel and its separate automation for normal success/failure notifications. See `live-payload-examples.json` and the independent dashboard example.
+
+## Device and entity names
+
+The HA device uses the configured root `script_name` as its display name. The example live device ID is `rclone_multithreaded_upload`, so the requested entity IDs include:
+
+- `sensor.job_live_rclone_multithreaded_upload_status`
+- `sensor.job_live_rclone_multithreaded_upload_progress_percent`
+- `sensor.job_live_rclone_multithreaded_upload_last_result`
+
+HA may add a suffix if an entity ID already exists. Change the dashboard card to match the actual entity IDs. Discovery must be enabled in the live config and accepted by the connected HA MQTT integration.
+
+## Offline checks
+
+The runtime MQTT dependency remains optional. To run the full offline suite, including actual Markdown/YAML rendering with a simulated HA registry:
+
+```bash
+python3 -m pip install -r requirements-test.txt
+python3 -m unittest discover -s tests -v
+```
+
+Card tests use the real discovery/state templates and include automatic job addition, renamed entities, success/failure results, first runs, heartbeat expiry, unknown metrics and diagnostic escaping. They do not connect to a real HA instance.

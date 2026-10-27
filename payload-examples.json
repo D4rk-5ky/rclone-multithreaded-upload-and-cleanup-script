@@ -13,14 +13,14 @@
     "schema_version": 1,
     "command": "rclone-multithreaded-upload",
     "comment": "",
-    "version": "0.0.27",
+    "version": "0.0.30",
     "timestamp": "2026-10-27T07:32:14.361317+00:00",
     "host": "darkyere-VirtualBox",
     "run_id": "rclone-example-success",
     "event": "rclone_multithreaded_upload_result",
     "script_name": "Camera archive upload",
     "application": "rclone-multithreaded-upload",
-    "application_version": "0.0.27",
+    "application_version": "0.0.30",
     "failed_remotes": [],
     "remotes": [
       {
@@ -51,14 +51,14 @@
     "schema_version": 1,
     "command": "rclone-multithreaded-upload",
     "comment": "",
-    "version": "0.0.27",
+    "version": "0.0.30",
     "timestamp": "2026-10-27T07:32:14.362198+00:00",
     "host": "darkyere-VirtualBox",
     "run_id": "rclone-example-failure",
     "event": "rclone_multithreaded_upload_result",
     "script_name": "Camera archive upload",
     "application": "rclone-multithreaded-upload",
-    "application_version": "0.0.27",
+    "application_version": "0.0.30",
     "failed_remotes": [
       "Primary archive"
     ],

@@ -21,7 +21,7 @@ import time
 from typing import Any
 import uuid
 
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 WORKER_FLAG = "--ha-live-preview-worker"
 
 
@@ -60,6 +60,7 @@ class LiveConfig:
     certfile: str | None = None
     keyfile: str | None = None
     device_id: str = "example_job"
+    manufacturer: str = "MQTT job template"
     topic_prefix: str = "job-live"
     discovery: bool = True
     send_on_dry_run: bool = False
@@ -82,6 +83,8 @@ class LiveConfig:
             raise ValueError("qos must be 0, 1 or 2")
         if not isinstance(self.device_id, str) or not re.fullmatch(r"[a-z0-9_]{1,80}", self.device_id):
             raise ValueError("device_id must contain 1-80 lowercase letters, digits or underscores")
+        if not isinstance(self.manufacturer, str) or not self.manufacturer.strip() or self.manufacturer != self.manufacturer.strip() or "\x00" in self.manufacturer:
+            raise ValueError("manufacturer must be nonempty text without NUL or surrounding whitespace")
         for key in ("topic_prefix", "discovery_prefix"):
             value = getattr(self, key)
             if not isinstance(value, str) or not value.strip("/").strip() or any(c in value for c in "+#\x00") or len(value.encode()) > 65000:
@@ -139,7 +142,7 @@ def discovery_messages(config: LiveConfig, name: str, version: str = "") -> list
             "name": label, "unique_id": identifier,
             "default_entity_id": f"sensor.{identifier}",
             "device": {"identifiers": [f"job_live_{config.device_id}"], "name": name,
-                       "manufacturer": "MQTT job template", "model": "Live job preview",
+                       "manufacturer": config.manufacturer, "model": "Live job preview",
                        "sw_version": version or __version__},
             "origin": {"name": "ha_live_preview", "sw_version": __version__},
             "state_topic": config.result_topic if result else config.state_topic,
@@ -159,16 +162,10 @@ def discovery_messages(config: LiveConfig, name: str, version: str = "") -> list
             payload["value_template"] = "{{ value_json." + key + "[:255] }}"
         if result:
             payload["json_attributes_topic"] = config.result_topic
+            payload["json_attributes_template"] = '{{ dict(value_json, live_preview_role="last_result") | tojson }}'
         elif key == "status":
             payload["json_attributes_topic"] = config.state_topic
-            payload["json_attributes_template"] = (
-                '{{ {"stderr": value_json.stderr, "error": value_json.error, '
-                '"run_id": value_json.run_id, "dry_run": value_json.dry_run, '
-                '"name": value_json.name, "job": value_json.job, '
-                '"successful_datasets": value_json.successful_datasets, '
-                '"failed_datasets": value_json.failed_datasets, '
-                '"skipped_datasets": value_json.skipped_datasets} | tojson }}'
-            )
+            payload["json_attributes_template"] = '{{ dict(value_json, live_preview_role="status") | tojson }}'
         messages.append({"topic": f"{config.discovery_prefix.rstrip('/')}/sensor/{identifier}/config",
                          "payload": payload, "retain": True, "qos": config.qos})
     return messages
@@ -213,6 +210,7 @@ class LivePreview:
     def _snapshot_locked(self) -> dict[str, Any]:
         return json.loads(_json({"schema_version": 1, "name": self.name, "title": self.name, "job": self.job,
                 "device_id": self.config.device_id, "run_id": self.run_id,
+                "manufacturer": self.config.manufacturer,
                 "host": socket.gethostname(), "version": self.version, "dry_run": self.dry_run,
                 "started_at": self._started_at, "last_heartbeat": _now(),
                 "runtime_seconds": round(max(0, (self._end_time if self._end_time is not None else time.monotonic()) - self._start_time), 2),

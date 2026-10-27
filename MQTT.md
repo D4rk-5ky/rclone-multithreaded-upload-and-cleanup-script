@@ -1,6 +1,6 @@
 # Syncerate template reporting for rclone-multithreaded-upload
 
-Version 0.0.27 uses the supplied `syncerate-mqtt-template` 1.1.0 modules. The completion and live modules are copied without changes into the Python package; `mqtt.py` and `reporting.py` adapt rclone results to them.
+Version 0.0.30 uses the newly supplied template: completion module 1.1.0 and live-preview module 1.2.0. The completion and live modules are copied without changes into the Python package; `mqtt.py` and `reporting.py` adapt rclone results to them.
 
 ## Configure the channels independently
 
@@ -57,7 +57,7 @@ Every completion payload has these template fields:
 | `warning` | Boolean; true if any remote's overall result was skipped. Warnings do not rewrite the result code. |
 | `schema_version` | Integer 1. |
 | `comment` | Optional root `comment` string, default empty. |
-| `version` | Application version, currently `"0.0.27"`. |
+| `version` | Application version, currently `"0.0.30"`. |
 | `timestamp`, `host`, `run_id` | UTC report timestamp, local hostname, unique run identifier. Both enabled channels share the run ID. |
 
 Rclone extensions remain available: `event`, `script_name`, `application`, `application_version`, `failed_remotes`, and `remotes`. Each remote retains its name, path, status, four stage statuses, and structured stage errors. Generic completion events omit Syncerate dataset sections; rclone diagnostics use `remotes`. See `payload-examples.json` for full success and failure examples.
@@ -78,8 +78,26 @@ The success `error` value is now the template's empty string instead of the form
 
 ## Home Assistant examples
 
-`home-assistant-mqtt-automation.example.yaml` retains the existing Pushover and persistent notification actions, now checking that the standard status, boolean success and integer exit code agree. It ignores dry-run payloads. Change `notify.pushover` to your actual action, or remove those actions to use persistent notifications alone. Its exact topic must match `completion.topic`.
+`home-assistant-mqtt-automation.example.yaml` retains the existing Pushover and persistent notification actions, now checking that the standard status, boolean success and integer exit code agree. It ignores dry-run payloads. Change `notify.pushover` to your actual action, or remove those actions to use persistent notifications alone. Its exact topic must match `completion.topic`. The Pushover branch reuses the latest supplied template formatter: titles are bounded, message length is budgeted for metadata/error and the latest stderr tail, and shortening is indicated. Rclone remote summaries are included within that same budget. Persistent HA failure notifications keep the full report error/stderr.
 
-`home-assistant-live-dashboard.example.yaml` is a separate manual dashboard card. The provided JSON examples and dashboard use device ID `rclone_multithreaded_upload`. Choose distinct live device IDs for distinct configured jobs. See `LIVE_PREVIEW.md` for the live fields and options. The live topics never trigger the completion automation.
+`manufacturer-live-preview-card.yaml` is the automatic Markdown dashboard card. Its manufacturer selector is already `rclone-multithreaded-upload`, matching the rclone adapter default and both JSON examples. It discovers matching devices and reads all available fields from the full status/last-result attributes; no entity list is required. The raw card content is also supplied as `manufacturer-live-preview-card.md`. The role markers allow published entities to be renamed. Run a live-enabled configured job to republish discovery after updating.
+
+`home-assistant-live-dashboard.example.yaml` remains an optional, separate entities/gauge dashboard card. The provided JSON examples and dashboard use device ID `rclone_multithreaded_upload`. Choose distinct live device IDs for distinct configured jobs. See `LIVE_PREVIEW.md` for the live fields and options. The live topics never trigger the completion automation.
 
 No real broker, HA instance, cloud service or production data was used for verification. Offline tests cover the actual publisher subprocesses using fake Paho helpers and execute the real application against a fake rclone executable.
+
+## Checking notification and live setup
+
+The two channels remain independent. For normal success/failure notifications, set `completion.enabled=true`, supply its broker settings and install `requirements-mqtt.txt`. Match `completion.topic` with the exact topic in `home-assistant-mqtt-automation.example.yaml`. The JSON uses `status: success/failure`, a real boolean `success`, integer `exit_code`, and string `error`/`stderr`; live `running` packets do not trigger that completion automation.
+
+For the automatic card, separately set `live.enabled=true`, `live.discovery=true` and the live broker settings. The default manufacturer is the application name `rclone-multithreaded-upload`, while `script_name` is the friendly job/device display name. `live.device_id` continues to distinguish jobs. If you intentionally override `live.manufacturer`, use that same text in the card selector. Existing configs without the new manufacturer option receive the correct application default.
+
+`--validate-config` shows enabled live manufacturer and topic settings but does not contact MQTT or publish discovery. A real configured job sends live discovery/state and final results. No broker/HA credentials were supplied for a live test; verification uses real publisher subprocesses and fake rclone/Paho, including a partial-upload failure.
+
+## Compatibility with the supplied automation template
+
+The current completion module still matches the supplied `mqtt_status.py` byte-for-byte. Reports include the fields used by the supplied HA examples: status, title/name/job, boolean success, integer exit_code, warning, error, stderr and dry_run. The application's completion topic is `homeassistant/rclone-upload/result` in both config examples and its HA automation. Set both ends to the same exact case-sensitive topic if customizing it. A sequencing automation that needs both outcomes also needs `completion.on_success=true`.
+
+The rclone automation preserves its dry-run guard, strict success/failure checks, Pushover and persistent notification actions. It uses the updated supplied Pushover formatter with a 1,024-character message budget and a title below 250 characters. Only the notification copy is shortened; MQTT report fields are unchanged. It sends no next-job commands. The unrelated chain topics/readiness commands discussed in the template package are not imported into this project.
+
+Manufacturer recognition applies to the live Markdown card, independently of the completion event topic. Both files are preset to `rclone-multithreaded-upload`. The card discovers registry devices through manufacturer and reads real full JSON attributes from the status/last-result roles. No per-job entity list is required. See `TEMPLATE_COMPATIBILITY.md` for the comparison findings.

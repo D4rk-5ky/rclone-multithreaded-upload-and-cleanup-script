@@ -10,6 +10,76 @@ Rollover rule:
 
 `0.0.100` is not used.
 
+## 0.0.30
+
+Latest supplied MQTT-template compatibility audit and bounded HA/Pushover notifications.
+
+### Code and automation
+
+- Incremented the application version from 0.0.29 to 0.0.30. No operational Python code changed.
+- Verified the supplied completion 1.1.0/live 1.2.0 modules still match byte-for-byte; reused them unchanged.
+- Updated the existing combined HA automation with the new supplied Pushover variable/message formatter, bounded title and message, latest stderr tail and explicit shortening marker. Kept rclone remote summaries inside that dynamic budget.
+- Reused the template's notification priority/sound fields. Preserved strict typed success/failure gates, dry-run suppression, topic, Pushover action and full persistent HA failure notification. MQTT report error/stderr fields are not shortened by this notification formatting.
+- Verified the supplied manufacturer Markdown/YAML card is unchanged in logic. Kept its rclone manufacturer selector and remote labels, auto-discovery, full attributes, role-based field lookup, renamed-entity support and independent live/completion channels.
+- No upload, cleanup, quota, reservation, backend, trash, lock, stage-barrier, discovery-ID, sequencing or scheduler behavior changed.
+
+### Documentation, examples and checks
+
+- Updated current README/MQTT usage, payload/discovery example versions and complete function/command map. Preserved the exact owner disclaimer.
+- Added TEMPLATE_COMPATIBILITY.md with exact comparison findings and source archive hash. All canonical config options remain present and config settings are retained.
+- Added rendered automation checks for success/failure metadata, long stderr/latest tail, long Unicode metadata, full persistent diagnostics, preview suppression, malformed/inconsistent reports and short output. Existing card/adapter/full-flow tests are reused.
+- Preserved all original and previous-release files; regenerated clean ZIP, preservation manifest, verification report and checksums. Detailed results and untested live integrations are in verification_report.txt.
+
+## 0.0.29
+
+Updated Syncerate live discovery and automatic manufacturer-based HA Markdown card.
+
+### Code and reporting
+
+- Incremented application version from 0.0.28 to 0.0.29 and added a shared APPLICATION_NAME constant reused by reporting and live configuration.
+- Replaced ha_live_preview.py with the newly supplied template 1.2.0 byte-for-byte. It adds validated manufacturer configuration, manufacturer in discovery/state, full status/result attributes and stable live_preview_role markers.
+- Defaulted the rclone adapter's manufacturer to rclone-multithreaded-upload, including when existing configs omit the new option. Explicit valid manufacturer overrides remain supported; matching card selectors are required for overrides.
+- Kept configured script_name as the individual job/device name and preserved device IDs, unique IDs, topics and the independent completion/live enable switches.
+- Added the effective manufacturer to the enabled live startup summary.
+- Reused the supplied, unchanged completion module 1.1.0 and existing rclone completion adapter. Verified real worker success and partial-upload failure payloads against the JSON contract and HA automation conditions.
+- No upload, cleanup, quota, reservation, backend, prerequisite, trash, stage-barrier or lock safety logic was changed.
+
+### Configuration and documentation
+
+- Added live.manufacturer to both complete config examples, preset to the script/application name.
+- Added manufacturer-live-preview-card.md and its exact YAML wrapper, both preset to rclone-multithreaded-upload. The card discovers matching jobs and fields automatically, supports renamed entities, and reads real status/result attributes. Rclone outcomes are labelled as remotes.
+- Preserved the existing notification automation and optional entities/gauge dashboard.
+- Added actual rclone HA discovery JSON examples and optional card-test requirements.
+- Updated current README/MQTT/live guides, payload example versions, complete function/command map, verification report, preservation manifest and checksums. Preserved the owner's disclaimer verbatim.
+
+### Verification
+
+- Added supplied manufacturer/role-marker tests and card rendering tests, actual rclone-adapter-to-card checks, HA completion-gate checks, and a partial-upload-failure variant reusing the existing real-entrypoint integration fixture.
+- Exact results and untested external integrations are in verification_report.txt. Full ZIP file preservation is checked against the original project and previous release.
+
+## 0.0.28
+
+Documentation completeness and verified release workflow.
+
+### Code
+
+- Incremented the application version from 0.0.27 to 0.0.28; the existing --version option continues to use the single package version constant.
+- Expanded the existing CLI help to explain independent completion/live JSON switches, the effects of normal copy/sync/move/cleanup runs, and the limits of --validate-config. No public flags were added or removed.
+- No upload, deletion, quota, reservation, stage-barrier, backend, lock or MQTT runtime logic was changed in this version. Existing modules and tests are reused.
+
+### Documentation, examples and release packaging
+
+- Replaced overlapping README disclaimers with the owner's supplied wording verbatim, retained the relevant remote-data warning, added setup steps, corrected current exit/validation behavior and documented upload commands.
+- Kept README focused on current app usage; release history remains in this file. Detailed MQTT/live guides remain available and now explain HA device/entity names explicitly.
+- Expanded commented_code_map.md with individual explanations and reasons for every explicit production function/method, including template internals, adapter functions and private worker commands; included a complete offline-test function inventory.
+- Audited both JSON config examples against every canonical configurable field; both were already complete and are retained. Refreshed payload example versions.
+- Added AGENTS.md to preserve the owner's maintenance rules, RELEASE_MANIFEST.json to report original/previous-release file preservation, and updated verification_report.txt and SHA256SUMS.
+- Preserved all files from the original supplied project and previous release, and excluded bytecode, caches and temporary files from the final ZIP.
+
+### Verification
+
+- Results, exact checks and untested integrations are recorded in verification_report.txt. Final ZIP membership and hashes are checked against both supplied original and v0.0.27 manifests.
+
 ## 0.0.27
 
 Syncerate-template completion JSON and independent Home Assistant live preview.

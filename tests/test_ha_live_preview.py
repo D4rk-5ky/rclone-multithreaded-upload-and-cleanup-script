@@ -46,6 +46,29 @@ class LiveTests(unittest.TestCase):
                 h.LiveConfig(**change)
         self.assertNotIn('secret-token', repr(h.LiveConfig(username='user', password='secret-token')))
 
+    def test_manufacturer_is_configurable_in_discovery_and_state(self):
+        config = h.LiveConfig(manufacturer='My Backup Jobs', device_id='nas_one')
+        messages = h.discovery_messages(config, 'NAS one')
+        self.assertTrue(all(item['payload']['device']['manufacturer'] == 'My Backup Jobs' for item in messages))
+        live = h.LivePreview(config, name='NAS one', job='backup')
+        self.assertEqual(live.snapshot()['manufacturer'], 'My Backup Jobs')
+        defaults = h.discovery_messages(replace(config, manufacturer='MQTT job template'), 'NAS one')
+        self.assertEqual([item['payload']['unique_id'] for item in messages],
+                         [item['payload']['unique_id'] for item in defaults])
+
+    def test_invalid_manufacturer_names_are_rejected(self):
+        for value in ('', ' ', ' leading', 'trailing ', 'bad\x00name', None, True):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                h.LiveConfig(manufacturer=value)
+
+    def test_aggregate_sensors_have_stable_role_markers(self):
+        messages = h.discovery_messages(h.LiveConfig(), 'NAS')
+        tagged = [item['payload']['json_attributes_template'] for item in messages
+                  if 'json_attributes_template' in item['payload']]
+        self.assertEqual(len(tagged), 2)
+        self.assertTrue(any('live_preview_role="status"' in text for text in tagged))
+        self.assertTrue(any('live_preview_role="last_result"' in text for text in tagged))
+
     def test_disabled_module_maintains_local_progress_without_processes(self):
         live = self.live()
         with patch.object(h, 'Thread') as thread, patch.object(h.subprocess, 'Popen') as process:

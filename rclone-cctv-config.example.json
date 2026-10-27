@@ -40,7 +40,8 @@
     "client_id": "",
     "ca_certs": null,
     "certfile": null,
-    "keyfile": null
+    "keyfile": null,
+    "manufacturer": "rclone-multithreaded-upload"
   },
   "delete_min_age": "31d",
   "lock_file": "/var/lock/subsys/RcloneLockFile.run",

@@ -35,6 +35,7 @@ class ConfigTests(unittest.TestCase):
                 self.assertFalse(STATE.mqtt.enabled)
                 self.assertFalse(STATE.live_config.enabled)
                 self.assertEqual(STATE.live_config.device_id, 'rclone_multithreaded_upload')
+                self.assertEqual(STATE.live_config.manufacturer, 'rclone-multithreaded-upload')
 
     def test_tls_paths_resolve_beside_config_and_password_repr_is_private(self):
         result = parse_mqtt_config({'completion': {'tls': True, 'ca_certs': 'tls/ca.pem',
@@ -48,6 +49,15 @@ class ConfigTests(unittest.TestCase):
         a = parse_live_config({}, Path('/tmp/a.json')).device_id
         self.assertEqual(a, parse_live_config({}, Path('/tmp/a.json')).device_id)
         self.assertNotEqual(a, parse_live_config({}, Path('/tmp/b.json')).device_id)
+
+    def test_rclone_manufacturer_defaults_for_existing_configs_and_can_be_overridden(self):
+        default = parse_live_config({}, Path('/tmp/old-config.json'))
+        self.assertEqual(default.manufacturer, 'rclone-multithreaded-upload')
+        custom = parse_live_config({'live': {'manufacturer': 'Custom rclone jobs'}}, Path('/tmp/config.json'))
+        self.assertEqual(custom.manufacturer, 'Custom rclone jobs')
+        for value in ('', ' padded ', None):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                parse_live_config({'live': {'manufacturer': value}}, Path('/tmp/config.json'))
 
     def test_legacy_mqtt_translation(self):
         result = parse_mqtt_config({'mqtt': {'enabled': True, 'host': 'broker', 'client_id': None,

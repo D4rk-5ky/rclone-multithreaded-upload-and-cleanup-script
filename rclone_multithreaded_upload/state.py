@@ -10,6 +10,7 @@ from pathlib import Path
 import threading
 import uuid
 
+from . import APPLICATION_NAME
 from .ha_live_preview import LiveConfig, LivePreview
 
 from .models import MqttConfig, RemoteRunResult, UploadDirectory
@@ -19,7 +20,7 @@ from .models import MqttConfig, RemoteRunResult, UploadDirectory
 class RuntimeState:
     script_name: str = "rclone-multithreaded-upload"
     mqtt: MqttConfig = field(default_factory=MqttConfig)
-    live_config: LiveConfig = field(default_factory=LiveConfig)
+    live_config: LiveConfig = field(default_factory=lambda: LiveConfig(manufacturer=APPLICATION_NAME))
     live_preview: LivePreview | None = field(default=None, repr=False)
     run_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     run_error: str = ""

@@ -20,7 +20,7 @@ def build_cli_parser() -> argparse.ArgumentParser:
     """Build the command-line parser with complete help for every supported flag."""
     parser = FullHelpArgumentParser(
         description=(
-            "Upload CCTV files to rclone remotes and clean managed remote folders. "
+            "Upload local directories to rclone remotes and clean managed remote folders. "
             "A config file is required for normal runs and config validation."
         ),
         epilog=(
@@ -30,7 +30,13 @@ def build_cli_parser() -> argparse.ArgumentParser:
             "  %(prog)s --config ./config.json --validate-config\n"
             "  %(prog)s --version\n"
             "  %(prog)s --help\n\n"
-            "CLI parse errors exit with status 2 and print this complete help text."
+            "CLI parse errors exit with status 2 and print this complete help text.\n"
+            "Normal runs apply configured copy/sync/move and cleanup operations.\n"
+            "Optional MQTT channels are controlled independently in JSON:\n"
+            "  completion.enabled: final success/failure notifications\n"
+            "  live.enabled: Home Assistant progress and discovery\n"
+            "Validation checks config values; it does not test source contents,\n"
+            "remote credentials, or broker connectivity."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
         add_help=False,
@@ -59,7 +65,7 @@ def build_cli_parser() -> argparse.ArgumentParser:
         action="store_true",
         help=(
             "Validate PATH, load all settings, print the effective startup summary, "
-            "then exit without creating the lock file or running any rclone command."
+            "then exit without creating the lock file or running any rclone command. No MQTT messages are published."
         ),
     )
     parser.add_argument(

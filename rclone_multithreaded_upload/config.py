@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 import json
 from pathlib import Path
 
+from . import APPLICATION_NAME
 from .ha_live_preview import LiveConfig, make_device_id
 
 from .models import DirectoryCleanupRule, MqttConfig, UploadDirectory
@@ -195,7 +196,8 @@ def parse_live_config(config: dict, config_path: Path) -> LiveConfig:
     if not isinstance(raw, dict):
         raise ValueError("live must be an object")
     raw = dict(raw)
-    raw.setdefault("device_id", make_device_id("rclone-multithreaded-upload", str(config_path.resolve())))
+    raw.setdefault("device_id", make_device_id(APPLICATION_NAME, str(config_path.resolve())))
+    raw.setdefault("manufacturer", APPLICATION_NAME)
     return _reporting_config("live", raw, LiveConfig, config_path.resolve().parent)
 
 
