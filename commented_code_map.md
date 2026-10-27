@@ -32,9 +32,7 @@ Single application version source. CLI `--version` imports this value so the dis
 
 ### `MqttConfig`
 
-Stores the optional broker, topic, authentication, QoS, retain, keepalive, TLS, CA, client-ID, and publish-timeout settings for one final result message.
-
-Why: MQTT notification settings stay typed and separate from destructive rclone/cleanup configuration, and disabled MQTT carries no runtime dependency.
+Compatibility alias for the supplied template's frozen `MQTTConfig`. Contains completion-channel broker, TLS, timeout and notification-policy settings; its password is hidden from repr. Canonical root config is `completion`; `mqtt` is a translated legacy alias. See `MQTT.md`.
 
 ### `DirectoryCleanupRule`
 
@@ -231,11 +229,9 @@ Reads a list containing only strings.
 
 Why: rclone option arrays must remain tokenized safely without shell parsing.
 
-### `parse_mqtt_config(config)`
+### Reporting config helpers
 
-Builds a fresh `MqttConfig`, validates enabled-broker requirements, numeric ranges, username/password dependency, and TLS option consistency.
-
-Why: malformed notification settings fail during normal config loading/`--validate-config` before the script starts destructive or network transfer work.
+`_reporting_config()` rejects unknown options, resolves relative TLS files beside the JSON config and invokes the template's strict config validator. `parse_mqtt_config()` loads canonical `completion` or translates legacy `mqtt` settings. `parse_live_config()` independently loads `live`, deriving a stable host/config device identity when no explicit device ID is supplied. See `MQTT.md` for migration.
 
 ### `parse_cleanup_rules(section_name, raw_upload)`
 
@@ -253,7 +249,7 @@ Why: users cannot accidentally recreate the transfer-limit failure, override ded
 
 ### `load_config(config_path_text)`
 
-Loads the complete config into `STATE`, including root `script_name` and a freshly parsed optional `mqtt` configuration, and validates thread limits, paths, and legacy schema rejection. It also fully parses `delete_min_age` before assigning runtime state, so `--validate-config` catches invalid age/duration values instead of deferring the error until cleanup planning.
+Loads the complete config into `STATE`, including root `script_name`, `comment`, independent template `completion` / `live` settings (or the translated legacy `mqtt` alias), and validates thread limits, paths, and legacy schema rejection. It also fully parses `delete_min_age` before assigning runtime state, so `--validate-config` catches invalid age/duration values instead of deferring the error until cleanup planning.
 
 It rejects obsolete top-level `directory_cleanup_rules`.
 
@@ -756,41 +752,25 @@ Why: concurrent work ends with one deterministic readable summary.
 
 ## `mqtt.py`
 
-### `_stage_errors(result)`
+`_stage_errors()` sanitizes and flattens stage failures. `build_result_payload()` calls the template's `build_report()` with rclone identity, authoritative integer exit code, diagnostic tail, warnings and run ID. Rclone fields remain as extensions: event, script/application identity, failed remotes and detailed remote results. It emits no Syncerate dataset sections.
 
-Flattens retained stage errors for one remote into JSON objects containing `stage` and `error`.
+`publish_result_payload()` delegates to the template's isolated, deadline-bounded publisher. `publish_final_result()` applies the enabled gate and logs sanitized sent/skipped/failed delivery without replacing the job's code. Success filtering belongs to the completion config only.
 
-Why: Home Assistant can inspect structured failures while the payload also retains human-readable text.
+## `mqtt_status.py`
 
-### `build_result_payload(exit_code)`
+Unmodified supplied template 1.1.0: typed completion JSON validation, policy gates, non-retained Paho helper publishing, verified TLS, private worker routing and timeout handling. This module imports no live-preview module.
 
-Builds schema version 1 of the final MQTT JSON object: script/application identity, UTC timestamp, success/failure state, exit code, combined failure text, failed friendly remote names, and every remote's stage statuses/errors.
+## `ha_live_preview.py`
 
-Why: consumers such as Home Assistant receive one stable run-level event without having to parse console output.
+Unmodified supplied template 1.1.0: independent config, local thread-safe progress, heartbeat, discovery, retained final outcome and killable MQTT subprocesses. This module imports no completion module. See `LIVE_PREVIEW.md` for the rclone measurement unit and every option.
 
-### `_load_paho_mqtt()`
+## `reporting.py`
 
-Imports `paho.mqtt.client` only when MQTT is actually enabled. Missing dependency becomes a clear runtime notification error.
+`start_reporting()` creates a fresh run ID and starts an enabled live monitor after the caller owns the lock. `update_live()` applies global phase/current-remote updates. `refresh_live()` snapshots stage outcomes under locks, counts settled stages and maps local/remote jobs to the template's outcome arrays. The adapter lock orders concurrent snapshots and updates to prevent progress moving backward.
 
-Why: existing non-MQTT installations remain dependency-free and backward compatible.
+`append_diagnostics()` keeps a shared sanitized 4,000-character diagnostic tail for both channels. `sanitize()` removes configured MQTT passwords and common credential flags. `finish_live()` refreshes outcomes, finalizes with the real code/error/warnings/interrupt marker and closes the monitor.
 
-### `_create_mqtt_client(mqtt, client_id)`
-
-Creates a paho client using the 2.x callback API used by the optional pinned dependency range, with a compatibility fallback for older constructor shapes.
-
-Why: optional MQTT support tolerates both major paho API generations without changing payload behavior.
-
-### `publish_result_payload(payload)`
-
-Applies configured authentication/TLS, connects to the broker, starts the Paho network loop, publishes compact JSON with configured QoS/retain, waits for completion, then disconnects/stops the network loop. A successful `loop_start()` may return `None` on older Paho behavior or `MQTT_ERR_SUCCESS` / `0` on newer behavior; both are accepted, while explicit error codes still fail publication.
-
-Why: the script does not report publication success merely because a payload was queued locally, and it preserves compatibility with both Paho network-loop return conventions.
-
-### `publish_final_result(exit_code)`
-
-No-ops when MQTT is disabled. When enabled it builds/publishes the final payload and reports publication success or failure. Transport failure is intentionally caught and logged rather than changing the completed rclone run's exit code.
-
-Why: MQTT is an optional observer/notification channel, not a prerequisite that can redefine whether the actual backup/cleanup work succeeded.
+Stage recording helpers in `results.py` call `refresh_live()` after releasing the result lock. Captured-command helpers append stderr when commands return; the existing merged upload stream appends each output line and updates the current remote.
 
 ## `output.py`
 
@@ -836,7 +816,7 @@ Why: a process must not delete a lock it does not own.
 
 ### `signal_handler(signum, frame)`
 
-Prints the signal, releases the owned lock, and exits with `128 + signum`.
+Prints the signal and raises `SystemExit(128 + signum)`. Main finalizes enabled reporting channels before releasing the owned lock.
 
 Why: handled termination should not leave a stale lock behind.
 
@@ -857,13 +837,15 @@ Top-level application orchestration:
 3. build cleanup targets and initialize result tracking;
 4. in validation mode, print summary and exit without lock/rclone;
 5. otherwise register lock cleanup/signal handlers and acquire the lock;
-6. print startup summary;
+6. start enabled live monitoring, assign a shared run ID and print startup summary;
 7. run barriered pre-upload preparation/trash/upload;
 8. run barriered post-upload cleanup/trash;
 9. run final verification;
 10. aggregate overall status, mark unresolved stages skipped, and print final result;
-11. optionally publish the schema-versioned MQTT result;
-12. return the rclone/cleanup run exit code.
+11. finalize enabled live preview and independently publish the template completion result;
+12. release the owned lock and return the rclone/cleanup run exit code.
+
+Private completion/live worker hooks run before the normal CLI parser. Runtime exceptions and handled interrupts enter the same final reporting boundary with a failure code. Validation and existing-lock exits never start reporting.
 
 Why: only this module decides application-wide phase order and final process status; optional MQTT publication happens only after that status is finalized and does not redefine it.
 

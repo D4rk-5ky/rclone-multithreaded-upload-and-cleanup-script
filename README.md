@@ -33,7 +33,7 @@ Always test with disposable data or a test remote first, run `--validate-config`
 
 # rclone-multithreaded-upload
 
-Version 0.0.26
+Version 0.0.27
 
 `rclone-multithreaded-upload` uploads one or more local directories to independent rclone destinations while enforcing configured age, file-count, folder-size, and managed remote-size limits.
 
@@ -235,7 +235,7 @@ error: unrecognized arguments: --wrong-flag
 - `0`: the complete requested run succeeded.
 - `1`: config loading failed or at least one required runtime stage failed.
 - Existing lock file: the application prints `Lock file exists, exiting.` and exits without starting work.
-- SIGINT/SIGTERM: the application attempts to remove the lock it created and exits with `128 + signal number`.
+- SIGINT/SIGTERM: the application finalizes enabled reporting channels, removes its lock, and exits with `128 + signal number`.
 
 ## Configuration
 
@@ -246,7 +246,10 @@ Start from `config.example.json` or the CCTV-oriented `rclone-cctv-config.exampl
 | Option | Required | Meaning |
 | --- | --- | --- |
 | `script_name` | No | Friendly name for this configured job/run. It is printed in the startup summary and included as `script_name` in the MQTT result payload. Default `rclone-multithreaded-upload`. |
-| `mqtt` | No | Optional object controlling one final JSON MQTT result publication after a completed normal run. MQTT is disabled by default. |
+| `completion` | No | Syncerate-template final success/failure MQTT reports. Disabled by default. |
+| `live` | No | Independent HA live progress, heartbeat, discovery and retained last result. Disabled by default. |
+| `mqtt` | No | Legacy completion-only alias; see `MQTT.md` for migration. Do not combine with `completion`. |
+| `comment` | No | Optional string included in the completion report. |
 | `delete_min_age` | No | Rclone-style age/duration used by cleanup rules that have `delete_old_files=true`. Default runtime value is `31d`. The value is fully parsed during config loading/`--validate-config`; invalid durations or timestamps are rejected before execution. |
 | `lock_file` | No | Single-instance lock-file path. |
 | `delete_list_dir` | No | Directory used for generated delete lists and quota-managed `--files-from0` upload lists. |
@@ -254,92 +257,24 @@ Start from `config.example.json` or the CCTV-oriented `rclone-cctv-config.exampl
 | `thread_limits` | No | Object containing the four worker limits below. |
 | `upload_directories` | Yes | Non-empty list of upload destinations. |
 
-### `mqtt`
+### MQTT completion and independent HA live preview
 
-MQTT publishing is optional and disabled unless `mqtt.enabled=true`. When enabled, the application publishes exactly one JSON result after the normal run reaches its final result. The MQTT transport is notification-only: a broker or publish failure is printed as an error but does **not** change the rclone/cleanup run's exit status.
+Version 0.0.27 integrates the supplied Syncerate MQTT template 1.1.0. Full rclone configs in `config.example.json` and `rclone-cctv-config.example.json` use the template's exact `completion` and `live` section names and keys. Both are disabled by default.
 
-The publisher is compatible with both Paho network-loop success conventions: older Paho behavior may return `None` from `client.loop_start()`, while newer releases return `MQTT_ERR_SUCCESS` (`0`). Both are treated as success; explicit non-success codes remain errors.
-
-Install the optional dependency only on systems that enable MQTT:
-
-```bash
-python3 -m pip install -r requirements-mqtt.txt
-```
-
-Example:
-
-```json
-"script_name": "Frigate CCTV Upload",
-"mqtt": {
-  "enabled": true,
-  "host": "192.168.10.10",
-  "port": 1883,
-  "topic": "homeassistant/rclone-upload/result",
-  "username": "rclone",
-  "password": "replace-with-your-mqtt-password",
-  "client_id": null,
-  "qos": 1,
-  "retain": false,
-  "keepalive": 60,
-  "tls": false,
-  "tls_insecure": false,
-  "ca_certs": null,
-  "publish_timeout": 10
-}
-```
-
-| Option | Required when enabled | Meaning |
+| Setup | `completion.enabled` | `live.enabled` |
 | --- | --- | --- |
-| `enabled` | No | Enables final-result publishing. Default `false`. |
-| `host` | Yes | MQTT broker hostname or IP address. |
-| `port` | No | Broker TCP port, `1..65535`. Default `1883`. |
-| `topic` | No | Topic receiving the JSON result. Must be a concrete publish topic without `+` or `#` wildcards. Default `rclone-multithreaded-upload/result`. |
-| `username` | No | MQTT username. If `password` is set, `username` is required. |
-| `password` | No | MQTT password. It is never printed in the startup summary. Protect the config file appropriately because this value is stored as plain configuration text. |
-| `client_id` | No | MQTT client ID. `null` lets the client library choose/derive an ID. |
-| `qos` | No | MQTT QoS `0`, `1`, or `2`. Default `1`. |
-| `retain` | No | Whether the result message is retained by the broker. Default `false` so Home Assistant does not receive an old run result merely because it reconnects/restarts. |
-| `keepalive` | No | MQTT keepalive seconds. Default `60`. |
-| `tls` | No | Enable TLS. Default `false`. |
-| `tls_insecure` | No | Disable TLS hostname/certificate verification. Requires `tls=true`; default `false`. Use only when you understand the security tradeoff. |
-| `ca_certs` | No | Optional CA certificate file passed to paho-mqtt. Requires `tls=true`. |
-| `publish_timeout` | No | Seconds to wait for broker connection/publication completion, `1..3600`. Default `10`. |
+| Final success/failure notifications | `true` | `false` |
+| HA dashboard only | `false` | `true` |
+| Both | `true` | `true` |
+| No MQTT | `false` | `false` |
 
-The result payload is intentionally stable and easy for Home Assistant to consume. A successful run looks like:
+Set your broker host, credentials and topics separately in each enabled section. Install the optional dependency with `python3 -m pip install -r requirements-mqtt.txt`. Check the complete config with `python3 rclone-multithreaded-upload.py --config config.json --validate-config`; validation never publishes.
 
-```json
-{
-  "schema_version": 1,
-  "event": "rclone_multithreaded_upload_result",
-  "script_name": "Frigate CCTV Upload",
-  "application": "rclone-multithreaded-upload",
-  "application_version": "0.0.26",
-  "timestamp": "2026-09-11T08:45:00Z",
-  "status": "success",
-  "success": true,
-  "exit_code": 0,
-  "error": null,
-  "failed_remotes": [],
-  "remotes": [
-    {
-      "name": "GDrive",
-      "remote_path": "Example-GDrive-Encrypted:Frigate",
-      "status": "success",
-      "stages": {
-        "reservation": "SUCCESS",
-        "upload": "SUCCESS",
-        "post_cleanup": "SUCCESS",
-        "final_quota": "SUCCESS"
-      },
-      "errors": []
-    }
-  ]
-}
-```
+Completion JSON now includes all template fields: `status`, boolean `success`, `title`, `name`, `job`, boolean `dry_run`, integer `exit_code`, string `error`/`stderr`, boolean `warning`, and schema/command/comment/version/timestamp/host/run metadata. The name/title come from `script_name`, and job/command identify `rclone-multithreaded-upload`. The existing `script_name`, `failed_remotes`, per-remote stages/errors and application metadata remain as extensions. A successful report has `error: ""`.
 
-On failure, `status` becomes `"failure"`, `success` becomes `false`, `exit_code` is non-zero, `failed_remotes` contains the friendly per-destination names, and `error` contains the captured stage error text. Each failed remote also has structured `errors` entries containing `stage` and `error`.
+`completion.on_success=false` suppresses successful completion events while keeping failure reports; it has no effect on live preview. Completion events are non-retained. Live state is on its own topics, with retained discovery and a separate retained last result. Live preview observes a real job and does not enable a dry-run mode. MQTT transport failures preserve the rclone/cleanup exit code.
 
-The packaged `home-assistant-mqtt-automation.example.yaml` subscribes to `homeassistant/rclone-upload/result`, branches on `trigger.payload_json.status`, and sends both Pushover and persistent notifications. Replace its `notify.pushover` action with the exact Pushover notify entity/action configured in your Home Assistant instance.
+See [MQTT.md](MQTT.md) for every config key, payload mappings, old `mqtt` config migration and HA notification setup. See [LIVE_PREVIEW.md](LIVE_PREVIEW.md) for live settings, stage-based progress and dashboard setup. Full JSON examples are in `payload-examples.json` and `live-payload-examples.json`.
 
 ### `thread_limits`
 
@@ -563,11 +498,11 @@ A stage can be `SUCCESS`, `FAILED`, or `SKIPPED`. Captured failure details are p
 
 ## MQTT final result and Home Assistant
 
-MQTT publication happens only after a normal run has completed reservation/upload, post-upload cleanup, final verification, and final result aggregation. `--validate-config` never publishes MQTT messages.
+Final completion reporting is attempted after runtime success/failure, unexpected exceptions and handled interrupts once a valid configuration and exclusive job lock are available. Existing-lock exits and `--validate-config` start neither channel. Reporting finishes before this invocation releases its lock.
 
-Home Assistant's MQTT trigger exposes parsed JSON as `trigger.payload_json`, so the included automation can branch directly on `status == 'success'` or `status == 'failure'`. The success message includes `script_name`; the failure message includes `script_name`, `failed_remotes`, and the combined `error` text.
+`home-assistant-mqtt-automation.example.yaml` retains Pushover and persistent notifications and checks consistency of the template's status, boolean success and integer exit code. Replace `notify.pushover` with your configured action, or remove those actions. Match its exact topic to `completion.topic`.
 
-Because `retain=false` is the default, each automation trigger represents a newly published run result rather than a retained historical result delivered when Home Assistant reconnects.
+`home-assistant-live-dashboard.example.yaml` is an independent card for the live device. Progress counts settled stages across remote jobs; byte totals and speed remain unknown. Set its entity IDs to match `live.device_id`. The live topics are separate from completion notifications.
 
 ## Project files
 
@@ -584,6 +519,9 @@ rclone_multithreaded_upload/
     main.py
     models.py
     mqtt.py
+    mqtt_status.py
+    ha_live_preview.py
+    reporting.py
     output.py
     phases.py
     planning.py
@@ -603,6 +541,11 @@ tests/
 config.example.json
 rclone-cctv-config.example.json
 home-assistant-mqtt-automation.example.yaml
+home-assistant-live-dashboard.example.yaml
+MQTT.md
+LIVE_PREVIEW.md
+payload-examples.json
+live-payload-examples.json
 requirements-mqtt.txt
 README.md
 VERSIONING.md

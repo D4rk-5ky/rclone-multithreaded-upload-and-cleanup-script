@@ -250,7 +250,33 @@ class FakeRcloneIntegrationTests(unittest.TestCase):
             env["PATH"] = f"{fake_bin}:{env['PATH']}"
             env["FAKE_RCLONE_STATE"] = str(state_path)
             env["FAKE_RCLONE_LOG"] = str(log_path)
-            env["PYTHONPATH"] = str(project_root)
+            # Exercise the real reporting workers with an offline Paho helper.
+            fake_packages = temp / "fake-packages"
+            package = fake_packages / "paho" / "mqtt"
+            package.mkdir(parents=True)
+            (package.parent / "__init__.py").write_text("")
+            (package / "__init__.py").write_text("")
+            (package / "publish.py").write_text('''import fcntl, json, os
+
+def multiple(messages, **options):
+    with open(os.environ["FAKE_MQTT_LOG"], "a") as handle:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        for message in messages:
+            handle.write(json.dumps(message) + "\\n")
+        handle.flush()
+        fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+def single(topic, payload, **options):
+    multiple([{"topic": topic, "payload": payload, "qos": options["qos"], "retain": options["retain"]}])
+''')
+            mqtt_log = temp / "mqtt.jsonl"
+            env["FAKE_MQTT_LOG"] = str(mqtt_log)
+            env["PYTHONPATH"] = os.pathsep.join([str(fake_packages), str(project_root)])
+            configured = json.loads(config_path.read_text())
+            configured["completion"] = {"enabled": True, "host": "offline-broker", "topic": "rclone/completion"}
+            configured["live"] = {"enabled": True, "host": "offline-broker", "device_id": "test_upload",
+                                  "min_publish_interval": 0.01, "final_wait": 2}
+            config_path.write_text(json.dumps(configured))
 
             try:
                 result = subprocess.run(
@@ -283,6 +309,24 @@ class FakeRcloneIntegrationTests(unittest.TestCase):
 
             self.assertEqual(result.returncode, 0, result.stdout)
             self.assertIn("OVERALL RESULT: SUCCESS", result.stdout)
+            messages = [json.loads(line) for line in mqtt_log.read_text().splitlines()]
+            completions = [row for row in messages if row["topic"] == "rclone/completion"]
+            self.assertEqual(len(completions), 1)
+            completion = json.loads(completions[0]["payload"])
+            self.assertEqual(completion["status"], "success")
+            self.assertFalse(completions[0]["retain"])
+            self.assertEqual(len(completion["remotes"]), 2)
+            finals = [row for row in messages if row["topic"].endswith("/last_result")]
+            self.assertEqual(len(finals), 1)
+            final = json.loads(finals[0]["payload"])
+            self.assertEqual(final["completed"], 8)
+            self.assertEqual(final["total"], 8)
+            self.assertEqual(final["successful_dataset_count"], 2)
+            self.assertEqual(final["status"], "success")
+            self.assertEqual(final["run_id"], completion["run_id"])
+            self.assertTrue(finals[0]["retain"])
+            self.assertTrue(all(not row["retain"] for row in messages if row["topic"].endswith("/state")))
+
 
             final_state = json.loads(state_path.read_text(encoding="utf-8"))
             for remote in ("fast:root", "slow:root"):

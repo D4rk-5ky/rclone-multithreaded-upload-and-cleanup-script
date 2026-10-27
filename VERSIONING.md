@@ -10,6 +10,19 @@ Rollover rule:
 
 `0.0.100` is not used.
 
+## 0.0.27
+
+Syncerate-template completion JSON and independent Home Assistant live preview.
+
+- Vendored the supplied template 1.1.0 `mqtt_status.py` and `ha_live_preview.py` unchanged.
+- Added canonical independent `completion` / `live` JSON sections and validation, including config-relative TLS certificate paths. Both default to disabled.
+- Final reports now include the complete typed template contract and preserve rclone remote/stage diagnostics. Success error is an empty string. Success suppression is independent of live monitoring.
+- Added live discovery, heartbeat, settled-stage progress, captured diagnostic tails, remote outcomes and retained last result; unmeasured transfer totals/speed stay null.
+- Added shared run IDs, runtime exception and interrupt reporting, bounded publishing workers and lock release after reporting. Ordinary notification errors preserve the job code.
+- Legacy `mqtt` configs are translated; see `MQTT.md` for removed retain/insecure behavior, keepalive handling and canonical defaults.
+- Updated both JSON configs, HA notification automation, separate live dashboard, payload examples, code map and offline verification.
+- Preserved reservation, cleanup, upload, quota, trash barriers and final verification algorithms. Expanded tests to cover adapter lifecycle and real publisher subprocesses alongside fake-rclone integration.
+
 ## 0.0.26
 
 MQTT legacy `loop_start()` compatibility fix release.

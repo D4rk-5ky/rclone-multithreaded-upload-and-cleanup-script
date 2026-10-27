@@ -1,0 +1,85 @@
+{
+  "success": {
+    "status": "success",
+    "success": true,
+    "title": "Camera archive upload",
+    "name": "Camera archive upload",
+    "job": "rclone-multithreaded-upload",
+    "dry_run": false,
+    "exit_code": 0,
+    "error": "",
+    "stderr": "",
+    "warning": false,
+    "schema_version": 1,
+    "command": "rclone-multithreaded-upload",
+    "comment": "",
+    "version": "0.0.27",
+    "timestamp": "2026-10-27T07:32:14.361317+00:00",
+    "host": "darkyere-VirtualBox",
+    "run_id": "rclone-example-success",
+    "event": "rclone_multithreaded_upload_result",
+    "script_name": "Camera archive upload",
+    "application": "rclone-multithreaded-upload",
+    "application_version": "0.0.27",
+    "failed_remotes": [],
+    "remotes": [
+      {
+        "name": "Primary archive",
+        "remote_path": "Example-GDrive-Encrypted:CameraArchive",
+        "status": "success",
+        "stages": {
+          "reservation": "SUCCESS",
+          "upload": "SUCCESS",
+          "post_cleanup": "SUCCESS",
+          "final_quota": "SUCCESS"
+        },
+        "errors": []
+      }
+    ]
+  },
+  "failure": {
+    "status": "failure",
+    "success": false,
+    "title": "Camera archive upload",
+    "name": "Camera archive upload",
+    "job": "rclone-multithreaded-upload",
+    "dry_run": false,
+    "exit_code": 1,
+    "error": "Primary archive - upload: Remote quota exceeded",
+    "stderr": "ERROR: upload failed: remote quota exceeded\n",
+    "warning": false,
+    "schema_version": 1,
+    "command": "rclone-multithreaded-upload",
+    "comment": "",
+    "version": "0.0.27",
+    "timestamp": "2026-10-27T07:32:14.362198+00:00",
+    "host": "darkyere-VirtualBox",
+    "run_id": "rclone-example-failure",
+    "event": "rclone_multithreaded_upload_result",
+    "script_name": "Camera archive upload",
+    "application": "rclone-multithreaded-upload",
+    "application_version": "0.0.27",
+    "failed_remotes": [
+      "Primary archive"
+    ],
+    "remotes": [
+      {
+        "name": "Primary archive",
+        "remote_path": "Example-GDrive-Encrypted:CameraArchive",
+        "status": "failed",
+        "stages": {
+          "reservation": "SUCCESS",
+          "upload": "FAILED",
+          "post_cleanup": "SKIPPED",
+          "final_quota": "SKIPPED"
+        },
+        "errors": [
+          {
+            "stage": "upload",
+            "error": "Remote quota exceeded"
+          }
+        ]
+      }
+    ]
+  }
+}

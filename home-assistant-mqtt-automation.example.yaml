@@ -8,18 +8,28 @@ triggers:
 conditions: []
 actions:
   - variables:
-      run_name: "{{ trigger.payload_json.script_name | default('Rclone upload', true) }}"
-      result_status: "{{ trigger.payload_json.status | default('failure', true) }}"
-      error_text: "{{ trigger.payload_json.error | default('Unknown error', true) }}"
+      report: >-
+        {{ trigger.payload_json if trigger.payload_json is defined and trigger.payload_json is mapping else {} }}
+      run_name: "{{ report.title | default(report.name | default('Rclone upload')) }}"
+      result_status: "{{ report.status | default('', true) }}"
+      error_text: "{{ report.error | default('Unknown error', true) }}"
       failed_remotes: >-
-        {{ trigger.payload_json.failed_remotes | default([], true) | join(', ') }}
+        {{ report.failed_remotes | default([], true) | join(', ') }}
       remote_names: >-
-        {{ trigger.payload_json.remotes | default([], true)
+        {{ report.remotes | default([], true)
            | map(attribute='name') | list | join(', ') }}
+  - if:
+      - condition: template
+        value_template: "{{ report.dry_run | default(false) | bool }}"
+    then:
+      - stop: Preview report ignored
   - choose:
       - conditions:
           - condition: template
-            value_template: "{{ result_status == 'success' }}"
+            value_template: >-
+              {{ result_status == 'success' and report.success is defined
+                 and report.success is sameas true and report.exit_code is defined
+                 and report.exit_code is integer and report.exit_code == 0 }}
         sequence:
           # Replace notify.pushover with your actual Pushover notify action/entity.
           - action: notify.pushover
@@ -36,7 +46,10 @@ actions:
                 {% if remote_names %} Remotes: {{ remote_names }}.{% endif %}
       - conditions:
           - condition: template
-            value_template: "{{ result_status == 'failure' }}"
+            value_template: >-
+              {{ result_status == 'failure' and report.success is defined
+                 and report.success is sameas false and report.exit_code is defined
+                 and report.exit_code is integer and report.exit_code != 0 }}
         sequence:
           # Replace notify.pushover with your actual Pushover notify action/entity.
           - action: notify.pushover
@@ -46,6 +59,7 @@ actions:
                 {{ run_name }} failed.
                 {% if failed_remotes %} Failed remotes: {{ failed_remotes }}.{% endif %}
                 Error: {{ error_text }}
+                Output: {{ report.stderr | default('') }}
           - action: persistent_notification.create
             data:
               title: "{{ run_name }} - FAILED"
@@ -54,6 +68,7 @@ actions:
                 {% if failed_remotes %}Failed remotes: {{ failed_remotes }}.
                 {% endif %}Error:
                 {{ error_text }}
+                Output: {{ report.stderr | default('') }}
     default:
       # A malformed/unknown payload should not silently disappear.
       - action: persistent_notification.create

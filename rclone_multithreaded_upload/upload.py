@@ -3,6 +3,7 @@
 import subprocess
 from pathlib import Path
 
+from .reporting import append_diagnostics, update_live
 from .models import UploadDirectory
 from .output import OUTPUT_LOCK, OUTPUT_SEPARATOR, print_job_block
 from .rclone_backend import get_delete_mode_options
@@ -49,6 +50,7 @@ def run_command_streamed(
         print(OUTPUT_SEPARATOR)
         print(flush=True)
 
+    update_live(current_item=remote_path)
     process = subprocess.Popen(
         command,
         stdout=subprocess.PIPE,
@@ -60,6 +62,7 @@ def run_command_streamed(
     captured_lines: list[str] = []
     if process.stdout is not None:
         for line in process.stdout:
+            append_diagnostics(line)
             captured_lines.append(line.rstrip("\n"))
             print_thread_output(thread_number, remote_path, line)
 

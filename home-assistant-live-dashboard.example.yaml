@@ -1,0 +1,57 @@
+# Paste this as a manual dashboard card. Replace rclone_multithreaded_upload with device_id.
+# HA may append a suffix if a requested entity ID already exists.
+type: vertical-stack
+cards:
+  - type: entities
+    title: Rclone upload live preview
+    entities:
+      - sensor.job_live_rclone_multithreaded_upload_status
+      - sensor.job_live_rclone_multithreaded_upload_phase
+      - sensor.job_live_rclone_multithreaded_upload_current_item
+      - sensor.job_live_rclone_multithreaded_upload_completed
+      - sensor.job_live_rclone_multithreaded_upload_total
+      - sensor.job_live_rclone_multithreaded_upload_successful_dataset_count
+      - sensor.job_live_rclone_multithreaded_upload_failed_dataset_count
+      - sensor.job_live_rclone_multithreaded_upload_skipped_dataset_count
+      - sensor.job_live_rclone_multithreaded_upload_runtime_seconds
+      - sensor.job_live_rclone_multithreaded_upload_transferred_bytes
+      - sensor.job_live_rclone_multithreaded_upload_bytes_per_second
+      - sensor.job_live_rclone_multithreaded_upload_last_heartbeat
+      - sensor.job_live_rclone_multithreaded_upload_last_result
+  - type: gauge
+    entity: sensor.job_live_rclone_multithreaded_upload_progress_percent
+    name: Progress
+    min: 0
+    max: 100
+  - type: markdown
+    title: Latest stderr and error
+    content: >-
+      {% set live = 'sensor.job_live_rclone_multithreaded_upload_status' %}
+      {% set last = 'sensor.job_live_rclone_multithreaded_upload_last_result' %}
+      {% set source = last if states(live) in ['unknown', 'unavailable'] else live %}
+      Error: {{ state_attr(source, 'error') or 'None supplied' }}
+
+      ```text
+
+      {{ state_attr(source, 'stderr') or 'No stderr supplied' }}
+
+      ```
+  - type: markdown
+    title: Remote results
+    content: >-
+      {% set live = 'sensor.job_live_rclone_multithreaded_upload_status' %}
+      {% set last = 'sensor.job_live_rclone_multithreaded_upload_last_result' %}
+      {% set source = last if states(live) in ['unknown', 'unavailable'] else live %}
+      {% for field, label in [('successful_datasets', 'Successful'), ('failed_datasets', 'Failed'), ('skipped_datasets', 'Skipped')] %}
+      **{{ label }}**
+
+      {% for row in state_attr(source, field) or [] %}
+      - {{ row.source | default(row.name | default('Unnamed dataset')) }}
+        {% if row.destination | default('') %} → {{ row.destination }}{% endif %}
+        {% if row.reason | default('') %}: {{ row.reason }}{% endif %}
+
+      {% else %}
+      None reported.
+
+      {% endfor %}
+      {% endfor %}

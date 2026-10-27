@@ -40,7 +40,7 @@ def release_lock():
 def signal_handler(signum, frame):
     del frame
     print_error(f"Received signal {signum}, exiting.")
-    release_lock()
+    # main finalizes both reporting channels before releasing the exclusive lock.
     sys.exit(128 + signum)
 
 

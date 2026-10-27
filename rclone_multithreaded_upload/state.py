@@ -8,6 +8,9 @@ stale copies of integers and Path objects after configuration loading.
 from dataclasses import dataclass, field
 from pathlib import Path
 import threading
+import uuid
+
+from .ha_live_preview import LiveConfig, LivePreview
 
 from .models import MqttConfig, RemoteRunResult, UploadDirectory
 
@@ -16,6 +19,13 @@ from .models import MqttConfig, RemoteRunResult, UploadDirectory
 class RuntimeState:
     script_name: str = "rclone-multithreaded-upload"
     mqtt: MqttConfig = field(default_factory=MqttConfig)
+    live_config: LiveConfig = field(default_factory=LiveConfig)
+    live_preview: LivePreview | None = field(default=None, repr=False)
+    run_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    run_error: str = ""
+    stderr_tail: str = ""
+    comment: str = ""
+    reporting_lock: threading.RLock = field(default_factory=threading.RLock, repr=False)
     upload_directories: list[UploadDirectory] = field(default_factory=list)
     config_path: Path | None = None
     delete_min_age: str = "31d"

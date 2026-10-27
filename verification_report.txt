@@ -1,84 +1,46 @@
-rclone-multithreaded-upload v0.0.26 verification report
-Date: 2026-09-16
+Verification report — rclone-multithreaded-upload 0.0.27
+Date: 2026-10-27
 
-SCOPE
------
-This release fixes final MQTT result publishing when the installed Paho MQTT
-client uses legacy loop_start() return behavior. No cleanup, reservation,
-upload, quota, delete-mode, locking, or final-verification algorithm was
-intentionally changed.
+Inputs:
+- rclone-multithreaded-upload-and-cleanup-script-main.zip, application 0.0.26
+- syncerate-mqtt-template.zip, modules 1.1.0
 
-MQTT LOOP_START COMPATIBILITY FIX
----------------------------------
-The v0.0.25 publisher required client.loop_start() to return MQTT_ERR_SUCCESS
-(0). Some valid Paho implementations instead return None after successfully
-starting the network loop. That caused an otherwise successful completed run to
-log:
+Environment: Python 3.14.4, Linux.
+Command from project root: python3 -m unittest discover -s tests -v
+Result: 103 tests passed in 6.469 seconds (OK).
 
-    MQTT network loop returned error code None
+Coverage:
+- Existing planning, reservation, cleanup, upload, quotas, remote snapshots,
+  newest-first selection, trash/delete modes, stage barriers and CLI behavior.
+- Template completion contract, typed fields, optional dataset diagnostics,
+  metadata, UTF-8, finite JSON values, stderr bounds and detached extensions.
+- Template success/dry-run gates, disabled dependency behavior, credentials via
+  stdin, verified TLS, publisher deadlines, sanitized failures and frozen hooks.
+- Template live lifecycle, discovery, heartbeat, retention, expiry settings,
+  progress validation, outcome arrays, final state, interrupts and incomplete jobs.
+- Real publisher subprocesses with fake Paho modules, including timeout cases.
+- Rclone adapter: all four independent channel combinations, shared run IDs,
+  stage failures, runtime exceptions, SIGTERM/KeyboardInterrupt mapping, lock
+  ownership through final reporting, disabled validation/existing-lock paths,
+  concurrent monotonic counters and sanitized bounded diagnostics.
+- Full application invocation against fake rclone plus actual completion/live
+  subprocess workers using fake Paho: one completion event, two remote results,
+  eight settled stages, shared run ID, non-retained live state and completion,
+  retained live last result, and existing three-snapshot/stage-barrier checks.
 
-v0.0.26 accepts both successful conventions:
-- None, used by legacy Paho behavior;
-- MQTT_ERR_SUCCESS / 0, used by newer behavior.
+Additional checks:
+- Both example configs pass the real CLI --validate-config command (exit 0).
+- CLI --version reports 0.0.27.
+- Every Python file parses with Python 3.10 syntax rules.
+- Every JSON file parses.
+- Supplied mqtt_status.py and ha_live_preview.py match the template ZIP byte-for-byte.
+- HA automation/dashboard YAML parses, including embedded Jinja syntax.
+- Automation gates accept valid success/failure and reject boolean exit codes,
+  inconsistent results and missing status.
+- Release SHA256SUMS and ZIP contents verified after packaging.
 
-Explicit non-success/error return codes are still rejected. After the network
-loop starts, the publisher continues to wait for broker connection, publish the
-configured JSON payload, wait for publication completion, disconnect, and stop
-the loop.
-
-MQTT FAILURE POLICY
--------------------
-MQTT remains notification-only. A broker/authentication/network/publish failure
-is reported but does not rewrite the already-computed backup/cleanup result or
-process exit code.
-
-CONFIGURATION
--------------
-No configuration field was added, removed, or renamed. Existing JSON configs
-remain compatible. Both packaged config examples still include the complete
-current MQTT option set and all existing upload/cleanup options.
-
-DOCUMENTATION
--------------
-- README.md documents current v0.0.26 behavior and all CLI flags.
-- VERSIONING.md contains the v0.0.26 release entry while preserving prior
-  release history.
-- commented_code_map.md explains the MQTT loop_start compatibility behavior and
-  continues to cover all checked functions/classes/methods.
-
-AUTOMATED / LOCAL VERIFICATION
-------------------------------
-- Application version: PASS, reports 0.0.26.
-- --help: PASS; all four supported CLI flag groups are described.
-- --validate-config config.example.json: PASS.
-- --validate-config rclone-cctv-config.example.json: PASS.
-- JSON syntax for both packaged configs: PASS.
-- Home Assistant example YAML parse: PASS.
-- compileall: PASS for entry point, package, and tests.
-- package imports: PASS for all 22 discovered package modules.
-- commented_code_map.md AST name coverage: PASS for 121 checked
-  functions/classes/non-dunder class methods.
-- unittest discovery: PASS, 42 tests.
-- New legacy-Paho regression: PASS; loop_start() returning None proceeds through
-  publish and clean loop shutdown.
-- Existing modern-Paho regression: PASS; loop_start() returning 0 remains
-  accepted.
-- Existing fake-rclone integration tests: PASS.
-
-PACKAGING VERIFICATION
-----------------------
-The release is packaged from the complete original project tree. Python cache
-files, bytecode, build cache, and temporary files are removed before packaging.
-The final file manifest is compared with the original zip so required original
-files are not accidentally dropped. SHA256SUMS is regenerated for packaged
-project files.
-
-NOT FULLY TESTED
-----------------
-No destructive end-to-end test was run against real Google Drive, MEGA,
-OneDrive, pCloud, crypt wrappers, or other live remotes. No live MQTT broker or
-Home Assistant instance was used from the sandbox, so broker authentication,
-ACLs, TLS, real network interruption behavior, and actual Home Assistant
-receipt remain outside local verification. The MQTT compatibility behavior was
-verified with deterministic fake Paho clients that exercise both loop_start()
-success conventions.
+Limits:
+No real MQTT broker, Home Assistant instance, TLS endpoint, rclone provider,
+production upload, or production deletion was exercised. Python 3.10 runtime and
+frozen executables were not built/run. HA YAML was checked locally, not imported
+into an HA installation. Transferred bytes/speed intentionally remain null.

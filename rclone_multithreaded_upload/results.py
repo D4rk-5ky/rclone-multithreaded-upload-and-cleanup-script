@@ -2,6 +2,7 @@
 
 import re
 
+from .reporting import refresh_live
 from .models import RemoteRunResult, StageRunResult
 from .output import OUTPUT_LOCK, OUTPUT_SEPARATOR
 from .state import STATE
@@ -30,6 +31,8 @@ def record_stage_success(remote_path: str, stage_name: str):
         if stage.status != "FAILED":
             stage.status = "SUCCESS"
 
+    refresh_live(STATE.run_results[remote_path].name)
+
 
 def record_stage_failure(remote_path: str, stage_name: str, error: str):
     cleaned = (error or "Unknown failure").strip()
@@ -39,12 +42,16 @@ def record_stage_failure(remote_path: str, stage_name: str, error: str):
         if cleaned and cleaned not in stage.errors:
             stage.errors.append(cleaned)
 
+    refresh_live(STATE.run_results[remote_path].name)
+
 
 def record_stage_skipped(remote_path: str, stage_name: str):
     with STATE.run_results_lock:
         stage = get_stage_result(remote_path, stage_name)
         if stage.status == "PENDING":
             stage.status = "SKIPPED"
+
+    refresh_live()
 
 
 def record_delete_plan_trash_deleted(remote_path: str, stage_name: str) -> None:
@@ -84,6 +91,8 @@ def finalize_stage_for_all(stage_name: str):
             if stage.status == "PENDING":
                 stage.status = "SUCCESS"
 
+    refresh_live()
+
 
 def mark_pending_stages_skipped():
     with STATE.run_results_lock:
@@ -97,6 +106,8 @@ def mark_pending_stages_skipped():
                 stage = getattr(result, stage_name)
                 if stage.status == "PENDING":
                     stage.status = "SKIPPED"
+
+    refresh_live()
 
 
 def command_error_summary(

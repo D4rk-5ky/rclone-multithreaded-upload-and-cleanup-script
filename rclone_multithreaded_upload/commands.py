@@ -2,6 +2,8 @@
 
 import subprocess
 
+from .reporting import append_diagnostics
+
 
 def run_command(
     command: list[str],
@@ -9,12 +11,16 @@ def run_command(
 ) -> subprocess.CompletedProcess:
     """Run a command without shell=True."""
     print(f"Running command: {' '.join(command)}", flush=True)
-    return subprocess.run(
+    result = subprocess.run(
         command,
         text=True,
         stdout=subprocess.PIPE if capture_output else None,
         stderr=subprocess.PIPE if capture_output else None,
     )
+
+    if capture_output and result.stderr:
+        append_diagnostics(result.stderr)
+    return result
 
 
 def is_directory_not_found(result: subprocess.CompletedProcess) -> bool:

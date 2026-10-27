@@ -1,8 +1,11 @@
 """External JSON configuration loading and validation."""
 
+from dataclasses import fields
 from datetime import datetime, timezone
 import json
 from pathlib import Path
+
+from .ha_live_preview import LiveConfig, make_device_id
 
 from .models import DirectoryCleanupRule, MqttConfig, UploadDirectory
 from .state import STATE
@@ -134,64 +137,66 @@ def optional_string_list(section_name: str, config: dict, key: str) -> list[str]
     return value
 
 
-def parse_mqtt_config(config: dict) -> MqttConfig:
-    """Parse optional final-result MQTT publishing settings."""
-    raw_mqtt = config.get("mqtt", {})
-    if not isinstance(raw_mqtt, dict):
+def _reporting_config(section: str, raw: dict, model, config_dir: Path):
+    """Validate template settings and resolve TLS files beside the JSON config."""
+    if not isinstance(raw, dict):
+        raise ValueError(f"{section} must be an object")
+    values = dict(raw)
+    unknown = set(values) - {item.name for item in fields(model)}
+    if unknown:
+        raise ValueError(f"{section}: unknown option(s): {', '.join(sorted(unknown))}")
+    for key in ("ca_certs", "certfile", "keyfile"):
+        value = values.get(key)
+        if isinstance(value, str) and value:
+            path = Path(value).expanduser()
+            values[key] = str(path if path.is_absolute() else config_dir / path)
+    try:
+        return model(**values)
+    except (ValueError, TypeError) as error:
+        raise ValueError(f"{section}.{error}") from error
+
+
+def parse_mqtt_config(config: dict, config_dir: Path = Path(".")) -> MqttConfig:
+    """Canonical template completion section, with a legacy mqtt adapter."""
+    if "completion" in config and "mqtt" in config:
+        raise ValueError("Use completion or legacy mqtt, not both")
+    if "mqtt" not in config:
+        return _reporting_config("completion", config.get("completion", {}), MqttConfig, config_dir)
+    raw = config["mqtt"]
+    if not isinstance(raw, dict):
         raise ValueError("mqtt must be an object")
+    raw = dict(raw)
+    # Validate historical options before translating. The template always uses
+    # non-retained events and verified TLS; unsupported behavior is explicit.
+    for key in ("retain", "tls_insecure"):
+        if optional_bool("mqtt", raw, key, False):
+            raise ValueError(f"mqtt.{key}=true is incompatible with the completion template")
+        raw.pop(key, None)
+    optional_int_in_range("mqtt", raw, "keepalive", 60, 1, 65535)
+    raw.pop("keepalive", None)  # Paho's publishing helper owns keepalive now.
+    if "publish_timeout" in raw:
+        if "timeout" in raw:
+            raise ValueError("mqtt: use timeout or publish_timeout, not both")
+        raw["timeout"] = raw.pop("publish_timeout")
+    for key in ("host", "client_id"):
+        if raw.get(key, "") is None:
+            raw[key] = ""
+    for key in ("username", "password"):
+        if raw.get(key) == "":
+            raw[key] = None
+    # Keep the former implicit topic/QoS for legacy configs only.
+    raw.setdefault("topic", "rclone-multithreaded-upload/result")
+    raw.setdefault("qos", 1)
+    return _reporting_config("mqtt", raw, MqttConfig, config_dir)
 
-    enabled = optional_bool("mqtt", raw_mqtt, "enabled", False)
-    host = optional_string("mqtt", raw_mqtt, "host", None)
-    topic = optional_string(
-        "mqtt",
-        raw_mqtt,
-        "topic",
-        "rclone-multithreaded-upload/result",
-    )
-    if topic is None:
-        raise ValueError("mqtt.topic must be a non-empty string")
-    if "+" in topic or "#" in topic:
-        raise ValueError("mqtt.topic must be a publish topic without + or # wildcards")
 
-    port = optional_int_in_range("mqtt", raw_mqtt, "port", 1883, 1, 65535)
-    qos = optional_int_in_range("mqtt", raw_mqtt, "qos", 1, 0, 2)
-    keepalive = optional_int_in_range("mqtt", raw_mqtt, "keepalive", 60, 1, 65535)
-    publish_timeout = optional_int_in_range(
-        "mqtt", raw_mqtt, "publish_timeout", 10, 1, 3600
-    )
-    username = optional_string("mqtt", raw_mqtt, "username", None)
-    password = optional_string("mqtt", raw_mqtt, "password", None)
-    client_id = optional_string("mqtt", raw_mqtt, "client_id", None)
-    tls = optional_bool("mqtt", raw_mqtt, "tls", False)
-    tls_insecure = optional_bool("mqtt", raw_mqtt, "tls_insecure", False)
-    ca_certs = optional_string("mqtt", raw_mqtt, "ca_certs", None)
-    retain = optional_bool("mqtt", raw_mqtt, "retain", False)
-
-    if enabled and host is None:
-        raise ValueError("mqtt.host is required when mqtt.enabled=true")
-    if password is not None and username is None:
-        raise ValueError("mqtt.username is required when mqtt.password is configured")
-    if tls_insecure and not tls:
-        raise ValueError("mqtt.tls_insecure=true requires mqtt.tls=true")
-    if ca_certs is not None and not tls:
-        raise ValueError("mqtt.ca_certs requires mqtt.tls=true")
-
-    return MqttConfig(
-        enabled=enabled,
-        host=host,
-        port=port,
-        topic=topic,
-        username=username,
-        password=password,
-        client_id=client_id,
-        qos=qos,
-        retain=retain,
-        keepalive=keepalive,
-        tls=tls,
-        tls_insecure=tls_insecure,
-        ca_certs=ca_certs,
-        publish_timeout=publish_timeout,
-    )
+def parse_live_config(config: dict, config_path: Path) -> LiveConfig:
+    raw = config.get("live", {})
+    if not isinstance(raw, dict):
+        raise ValueError("live must be an object")
+    raw = dict(raw)
+    raw.setdefault("device_id", make_device_id("rclone-multithreaded-upload", str(config_path.resolve())))
+    return _reporting_config("live", raw, LiveConfig, config_path.resolve().parent)
 
 
 def parse_cleanup_rules(
@@ -376,7 +381,11 @@ def load_config(config_path_text: str):
     )
     if script_name is None:
         raise ValueError("root.script_name must be a non-empty string")
-    mqtt_config = parse_mqtt_config(config)
+    mqtt_config = parse_mqtt_config(config, config_path.resolve().parent)
+    live_config = parse_live_config(config, config_path)
+    comment = config.get("comment", "")
+    if not isinstance(comment, str):
+        raise ValueError("root.comment must be a string")
     delete_min_age = optional_string(
         "root", config, "delete_min_age", STATE.delete_min_age
     )
@@ -429,6 +438,8 @@ def load_config(config_path_text: str):
 
     STATE.script_name = script_name
     STATE.mqtt = mqtt_config
+    STATE.live_config = live_config
+    STATE.comment = comment
     STATE.upload_directories = uploads
     STATE.delete_min_age = delete_min_age
     STATE.upload_threads = upload_threads
